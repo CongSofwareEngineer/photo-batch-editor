@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "name": "Web Export",
+  "settings": {
+    "temperature": 0,
+    "tint": 0,
+    "exposure": 0,
+    "brightness": 0,
+    "contrast": 0,
+    "highlights": 0,
+    "shadows": 0,
+    "whites": 0,
+    "blacks": 0,
+    "clarity": 0,
+    "vibrance": 0,
+    "saturation": 0,
+    "sharpening_amount": 25,
+    "noise_reduction": 0,
+    "vignette_amount": 0,
+    "super_resolution": "off",
+    "image_size": {
+      "mode": "long_edge",
+      "value": 2048,
+      "resample": "bicubic_sharper",
+      "dont_enlarge": false
+    }
+  }
+}

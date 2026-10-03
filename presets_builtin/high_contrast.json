@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "name": "High Contrast",
+  "settings": {
+    "temperature": 0,
+    "tint": 0,
+    "exposure": 0,
+    "brightness": 0,
+    "contrast": 30,
+    "highlights": 0,
+    "shadows": 0,
+    "whites": 10,
+    "blacks": -15,
+    "clarity": 25,
+    "vibrance": 0,
+    "saturation": 0,
+    "sharpening_amount": 0,
+    "noise_reduction": 0,
+    "vignette_amount": 0,
+    "super_resolution": "off",
+    "image_size": {
+      "mode": "off",
+      "value": 100,
+      "resample": "automatic",
+      "dont_enlarge": false
+    }
+  }
+}

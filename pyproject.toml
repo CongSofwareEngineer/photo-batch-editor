@@ -1,0 +1,88 @@
+# Tool configuration only (the app is not a pip package).
+#
+# Python's equivalent of ESLint + Prettier:
+#   Ruff    = formatter + linter (whitespace, imports, quotes, common bugs)  -> yellow warnings
+#   Pyright = type checker behind VS Code's Pylance (wrong attribute / call / import) -> red errors
+# Run everything with lint.bat / ./lint.sh; VS Code shows the same problems while typing and
+# formats + fixes on save (.vscode/settings.json).
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["venv", ".venv", "build", "dist", "installer_output", "ffmpeg", "models"]
+
+[tool.ruff.format]
+quote-style = "single"  # 'text' everywhere; "..." only when the text contains a '
+indent-style = "space"
+line-ending = "auto"
+docstring-code-format = true
+
+[tool.ruff.lint]
+# preview: enables the pycodestyle whitespace rules (E1xx, E2xx, E3xx) like ESLint's
+preview = true
+select = [
+    "E",    # pycodestyle errors: indentation, whitespace around operators / commas, blank lines
+    "W",    # pycodestyle warnings: trailing whitespace, whitespace on blank lines, no final newline
+    "F",    # pyflakes: unused imports / variables, undefined names, redefinitions
+    "I",    # isort: import order and grouping
+    "Q",    # flake8-quotes: single quotes
+    "B",    # bugbear: common bugs (mutable defaults, loop variables in closures, ...)
+    "UP",   # pyupgrade: modern syntax for Python 3.11
+    "C4",   # comprehensions
+    "SIM",  # simplifications
+    "PIE",  # unnecessary code (pass, duplicate keys, ...)
+    "RET",  # return statements
+    "T10",  # breakpoint() / pdb left in the code
+]
+ignore = [
+    "E501",    # long lines: the formatter wraps code; long strings / comments may stay
+    "B008",    # function calls in default arguments (dataclass field factories, Qt objects)
+    "SIM105",  # try/except/pass is fine (contextlib.suppress is slower and not clearer)
+    "SIM108",  # ternary operator: not always more readable
+    "SIM112",  # Windows environment variables keep their real case (SystemRoot)
+    "C408",    # dict(a=1) is fine
+    "RET504",  # assignment before return is fine (easier to debug)
+    "RET505",  # else after return is fine
+    "RET506",  # else after raise is fine
+    "Q003",    # do not force escaping quotes to keep a quote style
+]
+# Unused imports / variables are reported but not deleted on save (you may be about to use them)
+unfixable = ["F401", "F841"]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+multiline-quotes = "double"   # the formatter keeps """ for multi-line strings
+docstring-quotes = "double"   # PEP 257: docstrings always use """
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "ui", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]  # assert False in tests
+
+[tool.pyright]
+# Pylance in VS Code reads this too. "basic" + the rules below = errors for code that is wrong.
+include = ["core", "ui", "tests", "tools", "main.py", "dev.py"]
+exclude = ["**/__pycache__", "venv", ".venv", "build", "dist", "tools/export_onnx.py"]  # export_onnx needs torch
+venvPath = "."
+venv = "venv"
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+reportMissingModuleSource = "none"
+# "might be None" checks: too many false alarms with Qt (widgets created later in __init__)
+reportOptionalMemberAccess = "none"
+reportOptionalSubscript = "none"
+reportOptionalIterable = "none"
+reportOptionalCall = "none"
+reportOptionalOperand = "none"
+# wrong argument type: warning (the PySide6 stubs are not always right)
+reportArgumentType = "warning"
+# real mistakes stay errors (basic defaults): undefined variable, unknown attribute, wrong number
+# of arguments, missing import, wrong return type, possibly unbound variable, ...
+reportUndefinedVariable = "error"
+reportPossiblyUnboundVariable = "error"
+reportMissingImports = "error"
+reportAttributeAccessIssue = "error"
+reportCallIssue = "error"
+reportSelfClsParameterName = "error"
+reportRedeclaration = "error"

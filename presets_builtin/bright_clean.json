@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "name": "Bright & Clean",
+  "settings": {
+    "temperature": 0,
+    "tint": 0,
+    "exposure": 0.3,
+    "brightness": 0,
+    "contrast": 0,
+    "highlights": -20,
+    "shadows": 30,
+    "whites": 0,
+    "blacks": 0,
+    "clarity": 0,
+    "vibrance": 15,
+    "saturation": 0,
+    "sharpening_amount": 0,
+    "noise_reduction": 0,
+    "vignette_amount": 0,
+    "super_resolution": "off",
+    "image_size": {
+      "mode": "off",
+      "value": 100,
+      "resample": "automatic",
+      "dont_enlarge": false
+    }
+  }
+}

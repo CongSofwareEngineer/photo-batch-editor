@@ -1,0 +1,7 @@
+# CUDA 12 runtime libraries as pip packages, so the app (and the .exe) runs on a machine
+# with only the NVIDIA driver installed — no CUDA Toolkit needed (spec section 10.6).
+# Also needed when running from source on a GPU machine without the CUDA Toolkit.
+# Not installed on macOS (no NVIDIA GPU / CUDA there).
+-r requirements.txt
+cupy-cuda12x[ctk]>=13.0; sys_platform != "darwin"
+onnxruntime-gpu[cuda,cudnn]>=1.19,<1.27; sys_platform != "darwin"
