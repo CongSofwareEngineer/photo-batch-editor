@@ -1,6 +1,6 @@
 @echo off
 rem PRODUCTION BUILD FOR WINDOWS 10 / 11 (64-bit) - run on Windows.
-rem   tests -> bootloader -> build number +1 -> dist\PhotoBatchEditor\PhotoBatchEditor.exe -> installer (if Inno Setup 6 is installed)
+rem   tests -> bootloader -> build number +1 -> dist\PhotoBatchEditor\PhotoBatchEditor.exe (signed) -> installer (if Inno Setup 6 is installed)
 rem   build_windows.bat               full build
 rem   build_windows.bat --skip-tests  skip pytest
 rem One build runs on both Windows 10 and Windows 11. For a Mac build use build_mac.sh on a Mac.
@@ -41,6 +41,10 @@ echo Version %APP_VERSION%
 echo === PyInstaller ===
 %PY% -m PyInstaller --noconfirm PhotoBatchEditor.spec || exit /b 1
 echo Built: dist\PhotoBatchEditor\PhotoBatchEditor.exe  (version %APP_VERSION%)
+
+echo === Sign (self-signed certificate: fewer Windows warnings on other PCs) ===
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sign_windows.ps1" -Files "dist\PhotoBatchEditor\PhotoBatchEditor.exe" -CopyCertificateTo "dist\PhotoBatchEditor" || exit /b 1
+echo Signed: dist\PhotoBatchEditor\PhotoBatchEditor.exe  (+ PhotoBatchEditor.cer to send along)
 
 echo === Installer ===
 call "%~dp0build_installer.bat" || echo Installer skipped - the .exe above is ready to use.

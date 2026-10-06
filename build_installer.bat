@@ -1,6 +1,8 @@
 @echo off
 rem Builds installer_output\PhotoBatchEditor-Setup-<version>.exe (version from version.json) from dist\PhotoBatchEditor.
 rem Run build_windows.bat first. Needs Inno Setup 6 (winget install JRSoftware.InnoSetup).
+rem Signs the app .exe and the installer (tools\sign_windows.ps1) and puts PhotoBatchEditor.cer
+rem next to them: install that .cer once on the target PC, then nothing warns anymore.
 setlocal
 cd /d "%~dp0"
 set "ISCC="
@@ -21,7 +23,11 @@ if not defined APP_VERSION (
     echo Could not read version.json - run build_windows.bat first.
     exit /b 1
 )
+echo === Sign the app .exe (so the installer packs a signed file) ===
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sign_windows.ps1" -Files "dist\PhotoBatchEditor\PhotoBatchEditor.exe" -CopyCertificateTo "installer_output" || exit /b 1
 "%ISCC%" /DAppVersion=%APP_VERSION% installer.iss || exit /b 1
+echo === Sign the installer ===
+powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sign_windows.ps1" -Files "installer_output\PhotoBatchEditor-Setup-%APP_VERSION%.exe" || exit /b 1
 echo.
-echo Installer: installer_output\
+echo Installer: installer_output\  (PhotoBatchEditor-Setup-%APP_VERSION%.exe + PhotoBatchEditor.cer)
 endlocal

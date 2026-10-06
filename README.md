@@ -118,7 +118,7 @@ PyInstaller does not cross-compile: build the Windows app on Windows and the Mac
 
 | Target | Run on | Command | Result |
 |---|---|---|---|
-| Windows 10 / 11 (64-bit) | Windows | `build_windows.bat` | `dist\PhotoBatchEditor\PhotoBatchEditor.exe` + installer |
+| Windows 10 / 11 (64-bit) | Windows | `build_windows.bat` | `dist\PhotoBatchEditor\PhotoBatchEditor.exe` (signed) + installer |
 | macOS 11+ (MacBook) | Mac | `./build_mac.sh` | `dist/PhotoBatchEditor.app` + `.dmg` |
 
 Add `--skip-tests` to either command to skip pytest. One Windows build runs on both Windows 10
@@ -154,11 +154,25 @@ needs the free Microsoft C++ Build Tools, installed once:
 winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-Without them the build still works with the prebuilt bootloader (and prints a warning). If a
-build is still flagged, report it as a false positive (free) at
-<https://www.microsoft.com/wdsi/filesubmission>. SmartScreen (“Windows protected your PC”)
-appears for any unsigned app: *More info › Run anyway*, or right-click the file ›
-*Properties* › *Unblock*.
+Without them the build still works with the prebuilt bootloader (and prints a warning).
+
+**Code signing (self-signed, free).** Every Windows build signs `PhotoBatchEditor.exe` and the
+installer (`tools\sign_windows.ps1`, called by `build_windows.bat` / `build_installer.bat`;
+SHA-256 + timestamp, certificate `CN=Photo Batch Editor` created once in the build PC's
+`Cert:\CurrentUser\My`) and copies the public certificate to
+`dist\PhotoBatchEditor\PhotoBatchEditor.cer` and `installer_output\PhotoBatchEditor.cer`.
+
+On the other PC install `PhotoBatchEditor.cer` **once**: double-click → **Install
+Certificate…** → *Current User* → *Next* → *Place all certificates in the following store* →
+*Browse…* → **Trusted Root Certification Authorities** → *Next* → *Finish* (confirm). From then
+on the Setup and the app start with no “Windows protected your PC” / “unknown publisher”
+warning. Without the .cer the usual fallback stays: *More info › Run anyway*, or right-click the
+file › *Properties* › *Unblock*.
+
+A self-signed certificate is not a paid CA certificate: it proves the file was not modified but
+builds no reputation. If a build is still flagged or warned, report it as a false positive
+(free) at <https://www.microsoft.com/wdsi/filesubmission> — once Microsoft analyses the file, no
+PC warns about it whatever the certificate.
 
 ### macOS (MacBook)
 
@@ -192,6 +206,16 @@ The installer (≈ 1.5 GB) installs to Program Files (or per-user without admin 
 adds Start Menu / optional desktop shortcuts, a “GPU check” shortcut (runs `--selftest`
 and writes `Documents\PhotoBatchEditor-selftest.json`) and an uninstaller. User presets and
 settings are kept on uninstall.
+
+**What to give to the user** — the whole `installer_output\` folder (or a zip of it):
+
+| File | The user does |
+|---|---|
+| `PhotoBatchEditor.cer` | double-click → *Install Certificate…* → *Trusted Root Certification Authorities* (**once per PC**, see above) |
+| `PhotoBatchEditor-Setup-<version>.exe` | double-click → install (already signed) → shortcut on the desktop → done, no other file, no Python, no `.bat` |
+
+Nothing else is needed: the installer copies every DLL / model / ffmpeg itself, and after that a
+single double-click on the desktop shortcut starts the app.
 
 ## Code style: "ESLint for Python" (Ruff + Pyright)
 

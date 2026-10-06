@@ -16,3 +16,8 @@
   (`tools/build_bootloader.bat`) — `.exe` copy sang máy khác bị Windows Defender báo virus (báo nhầm do
   bootloader PyInstaller dùng chung), không có tiền mua chứng chỉ ký số.
 - 2026-10-06: Tách file log cũ `docs/dev-build.md` thành `instruction/` (hiện trạng) + `changelog/` (lịch sử) — theo rule mới trong CLAUDE.md.
+- 2026-10-06 | Thêm mới | Ký số self-signed cho bản build Windows: thêm `tools/sign_windows.ps1` (tạo chứng chỉ
+  `CN=Photo Batch Editor` trong `Cert:\CurrentUser\My`, ký `PhotoBatchEditor.exe` + Setup.exe, xuất `.cer` cạnh
+  `dist\` và `installer_output\`), `build_windows.bat` và `build_installer.bat` gọi script sau khi PyInstaller /
+  Inno Setup, build dừng nếu ký lỗi — user máy khác cài `PhotoBatchEditor.cer` 1 lần là hết cảnh báo Windows
+  Defender/SmartScreen, không mất tiền mua chứng chỉ thương mại.
