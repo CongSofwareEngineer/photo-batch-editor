@@ -95,3 +95,14 @@ def test_build_files_for_both_os():
         assert data.startswith(b'#!/usr/bin/env bash') and b'\r\n' not in data, sh  # bash needs LF
     bat = (ROOT / 'build_windows.bat').read_bytes()
     assert b'tools/fetch_ffmpeg.py' in bat and b'\x0c' not in bat
+
+
+def test_windows_build_signs_exe_and_installer():
+    ps1 = (ROOT / 'tools' / 'sign_windows.ps1').read_text(encoding='utf-8')
+    assert 'New-SelfSignedCertificate' in ps1 and 'Set-AuthenticodeSignature' in ps1
+    assert 'CN=Photo Batch Editor' in ps1 and 'Get-AuthenticodeSignature' in ps1
+    win = (ROOT / 'build_windows.bat').read_text(encoding='utf-8')
+    assert 'tools\\sign_windows.ps1' in win and '-CopyCertificateTo "dist\\PhotoBatchEditor"' in win
+    ins = (ROOT / 'build_installer.bat').read_bytes()
+    assert ins.count(b'-File "tools\\sign_windows.ps1"') == 2 and b'\x0c' not in ins
+    assert b'-CopyCertificateTo "installer_output"' in ins
