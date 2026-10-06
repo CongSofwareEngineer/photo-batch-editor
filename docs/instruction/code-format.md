@@ -1,4 +1,4 @@
-# Log: Format / lint / type check code (Ruff + Pyright) — "ESLint cho Python"
+# Format / lint / type check code (Ruff + Pyright) — "ESLint cho Python"
 
 - **Mục đích:** code Python theo một chuẩn chung, báo lỗi ngay khi gõ như ESLint: cảnh báo dư khoảng
   trắng / import thừa / import sai thứ tự / nháy đôi, báo **error** khi code sai; lưu file là tự format
@@ -6,6 +6,7 @@
 - **File:** `pyproject.toml` (`[tool.ruff]`, `[tool.pyright]`), `.vscode/settings.json`,
   `.vscode/extensions.json`, `requirements-dev.txt` (ruff, pyright), `lint.bat`, `lint.sh`,
   `build_windows.bat`, `build_mac.sh` (bước Lint)
+- **Changelog:** [../changelog/code-format.md](../changelog/code-format.md)
 
 ## Logic chính
 
@@ -49,12 +50,3 @@
 - `pytest -q` vẫn xanh sau khi format toàn bộ.
 - Thủ công: thêm `import os` không dùng / khoảng trắng cuối dòng / `"abc"` → gạch vàng; gọi
   `Path('a').abc()` → gạch đỏ; Ctrl+S → nháy đơn, xóa khoảng trắng, sắp xếp import.
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Thêm Ruff + format-on-save, format toàn bộ code một lần — người dùng muốn "eslint"
-  tự format khi lưu.
-- 2026-10-03: Mở rộng như ESLint — thêm rule khoảng trắng (preview), thứ tự import (`I`), nháy đơn
-  (`quote-style = "single"`, đổi 4855 chuỗi), `UP/C4/SIM/PIE/RET/T10`; thêm Pyright (Pylance) báo
-  error khi code sai, sửa 134 → 0 lỗi kiểu có sẵn (chủ yếu khai báo kiểu; `timeline.scroll` →
-  `view_start` vì đè method `QWidget.scroll`); `lint` chạy cả pyright; build chạy lint trước test.

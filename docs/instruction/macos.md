@@ -1,4 +1,4 @@
-# Log: Hỗ trợ macOS (MacBook)
+# Hỗ trợ macOS (MacBook)
 
 - **Mục đích:** app chạy được trên MacBook (Apple Silicon M1–M4 và Intel), cả từ source lẫn bản
   đóng gói `.app` / `.dmg`. Windows 10/11 giữ nguyên như cũ.
@@ -7,6 +7,7 @@
   `ui/file_list.py`, `ui/results_view.py`, `ui/image_viewer.py`, `core/i18n_vi.py`,
   `PhotoBatchEditor.spec`, `tools/fetch_ffmpeg.py`, `tools/make_icns.py` (mới), `assets/app.icns`,
   `build_mac.sh`, `dev.sh`
+- **Changelog:** [../changelog/macos.md](../changelog/macos.md)
 
 ## Logic chính
 
@@ -46,8 +47,3 @@
   định, spec/script build tồn tại.
 - Thủ công trên Mac: `./dev.sh` (chạy từ source), `./build_mac.sh`, mở `.app`, chạy batch CPU, Sửa
   ảnh/Sửa video (xuất MP4), "Show in Finder".
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Thêm hỗ trợ macOS (requirements marker, core/system.py, Finder, font, build_mac.sh,
-  dev.sh, spec BUNDLE) — người dùng muốn chạy app trên MacBook.

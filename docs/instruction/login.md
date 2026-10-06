@@ -1,7 +1,8 @@
-# Log: Đăng nhập (Login)
+# Đăng nhập (Login)
 
 - **Mục đích:** yêu cầu đăng nhập cục bộ khi mở app.
 - **File:** `core/auth.py`, `ui/login_view.py`, `ui/sidebar.py`, `ui/settings_view.py`
+- **Changelog:** [../changelog/login.md](../changelog/login.md)
 
 ## Logic chính
 
@@ -19,7 +20,3 @@
 ## Test
 
 `tests/test_auth.py`
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Ghi lại hiện trạng ban đầu.

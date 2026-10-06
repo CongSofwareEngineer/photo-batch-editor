@@ -1,8 +1,9 @@
-# Log: Super Resolution
+# Super Resolution
 
 - **Mục đích:** phóng to ảnh 2x / 4x bằng AI.
 - **File:** `core/enhance.py`, `models/realesr-general-x4v3.onnx`, `tools/export_onnx.py`,
   `tools/requirements-export.txt`
+- **Changelog:** [../changelog/super-resolution.md](../changelog/super-resolution.md)
 
 ## Logic chính
 
@@ -19,7 +20,3 @@
 ## Test
 
 `tests/test_enhance.py`
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Ghi lại hiện trạng ban đầu.

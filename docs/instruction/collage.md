@@ -1,9 +1,10 @@
-# Log: Cắt ghép layout (Collage)
+# Cắt ghép layout (Collage)
 
 - **Mục đích:** tạo ảnh ghép từ nhiều ảnh theo mẫu bố cục, chỉnh khoảng cách, màu nền, bo góc, kéo ảnh trong
   từng ô để căn vị trí; kết quả mở trong Sửa ảnh đơn như một ảnh mới (thêm chữ, xuất… như bình thường).
 - **File:** `core/photo/collage.py` (hình học, không Qt), `ui/photo/collage_dialog.py` (hộp thoại + vẽ),
   mở từ `ui/photo/photo_editor_view.py` (công cụ L / menu "Tạo ảnh ghép mới…")
+- **Changelog:** [../changelog/collage.md](../changelog/collage.md)
 
 ## Logic chính
 
@@ -24,8 +25,3 @@
 
 `tests/test_photo_core.py`: `test_collage_cells_spacing` (mọi mẫu: trong lề, không chồng, đủ khoảng cách),
 `test_collage_cover_and_clamp`. Thủ công: công cụ L → chọn 3 ảnh, mẫu 1 lớn + 2 nhỏ, bo góc 40, kéo ảnh.
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Tạo file log trước khi code (kế hoạch).
-- 2026-10-03: Hoàn thành GĐ3 (hộp thoại collage, 4 mẫu, khoảng cách / màu nền / bo góc, kéo + zoom trong ô).

@@ -1,8 +1,9 @@
-# Log: 15 chỉnh sửa kiểu Camera Raw
+# 15 chỉnh sửa kiểu Camera Raw
 
 - **Mục đích:** các thanh chỉnh ảnh đặt tên giống Camera Raw.
 - **File:** `core/adjustments.py`, `core/settings.py`, `core/pipeline.py`,
   `ui/adjustment_panel.py`, `ui/preview.py`
+- **Changelog:** [../changelog/adjustments.md](../changelog/adjustments.md)
 
 ## Logic chính
 
@@ -16,7 +17,3 @@
 ## Test
 
 `tests/test_adjustments.py`
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Ghi lại hiện trạng ban đầu.

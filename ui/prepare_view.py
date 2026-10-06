@@ -68,7 +68,6 @@ class PrepareView(QWidget):
         self.files: list[Path] = []
         self.dims: dict[Path, tuple[int, int]] = {}
         self.gpu_info: GpuInfo | None = None
-        self._gpu_banner_shown = False
         self._scan_gen = 0
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(1)
@@ -131,10 +130,6 @@ class PrepareView(QWidget):
         top.addWidget(self.preset_menu_btn)
         top.addWidget(self.manage_btn)
 
-        self.gpu_banner = QLabel()
-        self.gpu_banner.setObjectName('WarningBanner')
-        self.gpu_banner.setWordWrap(True)
-        self.gpu_banner.hide()
         self.error_label = QLabel()
         self.error_label.setObjectName('Error')
         self.error_label.hide()
@@ -206,7 +201,6 @@ class PrepareView(QWidget):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(10)
         lay.addWidget(top_box)
-        lay.addWidget(self.gpu_banner)
         lay.addWidget(self.error_label)
         lay.addWidget(self.splitter, 1)
         lay.addWidget(bottom)
@@ -389,14 +383,6 @@ class PrepareView(QWidget):
         eff = self.device.effective_device()
         self.preview.set_device(eff, self._sr_uses_cuda())
         self._warm_up_sr()
-        if self.device.gpu_unusable() and not self._gpu_banner_shown:
-            self._gpu_banner_shown = True
-            self.gpu_banner.setText(
-                tr('⚠ NVIDIA GPU unavailable — processing will run on the CPU.')
-                + '  '
-                + (tr_msg(self.gpu_info.reason or '') if self.gpu_info else '')
-            )
-            self.gpu_banner.show()
         self.update_output_info()
 
     def _selected_changed(self, path: Path | None) -> None:

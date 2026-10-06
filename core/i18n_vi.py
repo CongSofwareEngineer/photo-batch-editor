@@ -84,6 +84,9 @@ TEXT: dict[str, str] = {
     'Detecting NVIDIA GPU…': 'Đang dò GPU NVIDIA…',
     '⏳ Detecting GPU…': '⏳ Đang dò GPU…',
     'GPU unavailable — processing runs on the CPU': 'Không dùng được GPU — xử lý bằng CPU',
+    'No usable NVIDIA GPU — the app runs on the CPU. Nothing to install.': 'Không có GPU NVIDIA dùng được — app chạy bằng CPU. Không cần cài thêm gì.',
+    'Details: ': 'Chi tiết: ',
+    'No usable NVIDIA GPU on this computer': 'Máy này không có GPU NVIDIA dùng được',
     'Unknown reason.': 'Không rõ nguyên nhân.',
     'VRAM: {free} free / {total} total': 'VRAM: trống {free} / tổng {total}',
     'Driver: {version}': 'Driver: {version}',
@@ -331,7 +334,9 @@ TEXT: dict[str, str] = {
     'Web Export': 'Xuất cho web',
     # Messages from core (translated when shown, see core.i18n.tr_msg) --------------------------
     'No NVIDIA GPU found on this computer.': 'Không tìm thấy GPU NVIDIA trên máy này.',
-    'NVIDIA driver is too old for CUDA 12. Please update to the latest driver (NVIDIA App or nvidia.com).': 'Driver NVIDIA quá cũ cho CUDA 12. Hãy cập nhật driver mới nhất (NVIDIA App hoặc nvidia.com).',
+    'NVIDIA driver is older than CUDA 12 needs. Optional: updating the driver (NVIDIA App or nvidia.com) '
+    'enables the GPU speed-up.': 'Driver NVIDIA cũ hơn mức CUDA 12 cần. Tùy chọn: cập nhật driver (NVIDIA App hoặc nvidia.com) '
+    'để tăng tốc bằng GPU.',
     'Photo too large for VRAM, processed on CPU': 'Ảnh quá lớn so với VRAM, đã xử lý bằng CPU',
     'GPU error, processed on CPU': 'Lỗi GPU, đã xử lý bằng CPU',
     'Corrupt file': 'File bị hỏng',

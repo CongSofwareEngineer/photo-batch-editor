@@ -9,6 +9,7 @@
 # _internal/nvidia/<component>/bin, the same layout as in site-packages, and registered at
 # startup by core.paths.add_cuda_dll_dirs(). CUDA headers (nvidia/*/include) are bundled for
 # CuPy's runtime kernel compilation (NVRTC). A Mac has no NVIDIA GPU: CPU only.
+import json
 import os
 import sys
 
@@ -16,12 +17,21 @@ from PyInstaller.utils.hooks import (collect_data_files, collect_dynamic_libs, c
                                      copy_metadata)
 
 IS_MAC = sys.platform == "darwin"
-VERSION = "1.0.0"
+# version.json: "version" set by hand, "build" +1 per build (tools/bump_build.py, which also
+# writes the Windows version resource build/version_info.txt shown in Properties > Details)
+with open(os.path.join(SPECPATH, "version.json"), encoding="utf-8") as f:  # noqa: F821
+    _ver = json.load(f)
+VERSION = _ver["version"]
+BUILD = str(_ver["build"])
+VERSION_INFO = os.path.join(SPECPATH, "build", "version_info.txt")  # noqa: F821
+if not IS_MAC and not os.path.isfile(VERSION_INFO):
+    print(f"[spec] {VERSION_INFO} missing (run tools/bump_build.py): the .exe has no version info")
 
 datas = [
     ("ui/theme.qss", "ui"),
     ("presets_builtin", "presets_builtin"),
     ("models", "models"),
+    ("version.json", "."),  # read by core.version at runtime
 ]
 binaries = []
 hiddenimports = []
@@ -102,6 +112,7 @@ exe = EXE(
     codesign_identity=None,  # macOS: ad-hoc signature
     entitlements_file=None,
     icon="assets/app.icns" if IS_MAC else "assets/app.ico",
+    version=None if IS_MAC or not os.path.isfile(VERSION_INFO) else VERSION_INFO,
 )
 coll = COLLECT(
     exe,
@@ -124,7 +135,7 @@ if IS_MAC:
             "CFBundleDisplayName": "Photo Batch Editor",
             "CFBundleName": "Photo Batch Editor",
             "CFBundleShortVersionString": VERSION,
-            "CFBundleVersion": VERSION,
+            "CFBundleVersion": BUILD,
             "LSMinimumSystemVersion": "11.0",
             "NSHighResolutionCapable": True,
             "NSRequiresAquaSystemAppearance": False,

@@ -1,5 +1,5 @@
 @echo off
-rem Builds installer_output\PhotoBatchEditor-Setup-<version>.exe from dist\PhotoBatchEditor.
+rem Builds installer_output\PhotoBatchEditor-Setup-<version>.exe (version from version.json) from dist\PhotoBatchEditor.
 rem Run build_windows.bat first. Needs Inno Setup 6 (winget install JRSoftware.InnoSetup).
 setlocal
 cd /d "%~dp0"
@@ -15,7 +15,13 @@ if not exist dist\PhotoBatchEditor\PhotoBatchEditor.exe (
     echo dist\PhotoBatchEditor not found - run build_windows.bat first.
     exit /b 1
 )
-"%ISCC%" installer.iss || exit /b 1
+set "APP_VERSION="
+for /f "delims=" %%V in ('venv\Scripts\python.exe tools/bump_build.py --print') do set "APP_VERSION=%%V"
+if not defined APP_VERSION (
+    echo Could not read version.json - run build_windows.bat first.
+    exit /b 1
+)
+"%ISCC%" /DAppVersion=%APP_VERSION% installer.iss || exit /b 1
 echo.
 echo Installer: installer_output\
 endlocal

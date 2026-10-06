@@ -279,7 +279,8 @@ def _nvidia_driver_present() -> bool:
 
 NO_GPU = 'No NVIDIA GPU found on this computer.'
 OLD_DRIVER = (
-    'NVIDIA driver is too old for CUDA 12. Please update to the latest driver (NVIDIA App or nvidia.com).'
+    'NVIDIA driver is older than CUDA 12 needs. Optional: updating the driver (NVIDIA App or nvidia.com) '
+    'enables the GPU speed-up.'
 )
 
 

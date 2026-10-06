@@ -2,7 +2,10 @@
 ; Build: build_installer.bat  (needs Inno Setup 6 and dist\PhotoBatchEditor from build_windows.bat)
 
 #define AppName "Photo Batch Editor"
-#define AppVersion "1.0.0"
+; Passed by build_installer.bat from version.json (/DAppVersion=1.0.0.12)
+#ifndef AppVersion
+  #define AppVersion "0.0.0.0"
+#endif
 #define AppExe "PhotoBatchEditor.exe"
 
 [Setup]
@@ -10,6 +13,8 @@ AppId={{FA6B7FF5-556D-496A-AB0F-B1598CD6FCD8}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
+VersionInfoVersion={#AppVersion}
+VersionInfoProductName={#AppName}
 AppPublisher=Photo Batch Editor
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}

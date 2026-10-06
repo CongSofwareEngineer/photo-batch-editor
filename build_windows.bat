@@ -1,6 +1,6 @@
 @echo off
 rem PRODUCTION BUILD FOR WINDOWS 10 / 11 (64-bit) - run on Windows.
-rem   tests -> dist\PhotoBatchEditor\PhotoBatchEditor.exe -> installer (if Inno Setup 6 is installed)
+rem   tests -> bootloader -> build number +1 -> dist\PhotoBatchEditor\PhotoBatchEditor.exe -> installer (if Inno Setup 6 is installed)
 rem   build_windows.bat               full build
 rem   build_windows.bat --skip-tests  skip pytest
 rem One build runs on both Windows 10 and Windows 11. For a Mac build use build_mac.sh on a Mac.
@@ -30,9 +30,17 @@ rem     --add-data "models;models" main.py
 echo === FFmpeg (Video editor) ===
 %PY% tools/fetch_ffmpeg.py || exit /b 1
 
+echo === Bootloader (built from source: fewer false antivirus alerts) ===
+call "%~dp0tools\build_bootloader.bat" || echo WARNING: using the prebuilt PyInstaller bootloader - Windows Defender may flag the .exe.
+
+echo === Version ===
+for /f "delims=" %%V in ('%PY% tools/bump_build.py') do set "APP_VERSION=%%V"
+if not defined APP_VERSION exit /b 1
+echo Version %APP_VERSION%
+
 echo === PyInstaller ===
 %PY% -m PyInstaller --noconfirm PhotoBatchEditor.spec || exit /b 1
-echo Built: dist\PhotoBatchEditor\PhotoBatchEditor.exe
+echo Built: dist\PhotoBatchEditor\PhotoBatchEditor.exe  (version %APP_VERSION%)
 
 echo === Installer ===
 call "%~dp0build_installer.bat" || echo Installer skipped - the .exe above is ready to use.

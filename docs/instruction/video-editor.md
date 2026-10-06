@@ -1,4 +1,4 @@
-# Log: Sửa video (Video editor)
+# Sửa video (Video editor)
 
 - **Mục đích:** trang "Sửa video": xem trước, cắt nhiều đoạn + ghép theo thứ tự, xóa đoạn giữa, tắt tiếng,
   chèn chữ (tiếng Việt), chèn nhạc (âm lượng riêng, fade out), xuất MP4 / MOV (giữ nguyên / 1080p / 720p) bằng
@@ -11,6 +11,7 @@
     `panels.py` (Đoạn / Chữ / Âm thanh / Xuất), `text_render.py` (vẽ chữ bằng Qt → PNG),
     `video_editor_view.py` (trang + `ExportWorker` QThread)
   - `tools/fetch_ffmpeg.py`, `PhotoBatchEditor.spec`, `build_windows.bat`, `build_mac.sh`, `requirements.txt` (imageio-ffmpeg)
+- **Changelog:** [../changelog/video-editor.md](../changelog/video-editor.md)
 
 ## Logic chính
 
@@ -63,13 +64,3 @@
   không để lại file, PNG chữ đúng vị trí ở độ phân giải đầu ra, trang video mở / cắt / undo / thêm chữ.
 - Thủ công: `dev.bat` → Sửa video (Ctrl+3): mở video điện thoại, phát, cắt 2 lần xóa đoạn giữa, kéo đổi thứ tự,
   thêm chữ có dấu và kéo trên hình, thêm nhạc mp3 bắt đầu từ giây 30 + fade, xuất 720p MP4 và MOV, bấm Hủy giữa chừng.
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Tạo file log trước khi code (kế hoạch).
-- 2026-10-03: Hoàn thành GĐ4–GĐ5: xem trước, timeline, cắt / ghép / xóa đoạn giữa, tắt tiếng, chèn chữ, chèn nhạc,
-  xuất MP4/MOV 1080p/720p chạy nền có % và Hủy; kèm ffmpeg.exe khi build.
-- 2026-10-03: Build tách `build_windows.bat` / `build_mac.sh`; trên Mac ffmpeg là `ffmpeg/ffmpeg`, đóng gói
-  vào `Contents/Frameworks/ffmpeg/`; font chữ mặc định theo hệ điều hành (`core.system.DEFAULT_FONT_FAMILY`).
-- 2026-10-03: `TimelineWidget.scroll` đổi tên thành `view_start` (thuộc tính cũ đè lên method `QWidget.scroll()`,
-  Pyright báo lỗi); kéo trên timeline khi chưa có project thì bỏ qua — xem code-format.md.

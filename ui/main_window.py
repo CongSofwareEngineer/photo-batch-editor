@@ -23,6 +23,7 @@ from core.paths import APP_NAME, local_appdata_dir, resource_path
 from core.presets import Preset
 from core.scanner import OutputFolderError, default_output_dir, next_free_output_dir
 from core.settings import AdjustmentSettings
+from core.version import read_version
 from ui.icons import write_stylesheet_icons
 from ui.image_viewer import ImageViewer
 from ui.login_view import LoginView
@@ -284,7 +285,7 @@ class MainWindow(QMainWindow):
         filters = self.settings_view.filters
         state = {
             'version': 1,
-            'device': self.prepare.device.device(),
+            'device': self.prepare.device.preferred_device(),
             'settings': self.prepare.settings().to_dict(),
             'last_folder': str(self.prepare.folder) if self.prepare.folder else '',
             'preset': self.prepare.current_preset.name if self.prepare.current_preset else '',
@@ -491,6 +492,7 @@ def run_app() -> int:
     QApplication.setApplicationName(APP_NAME)
     QApplication.setOrganizationName('')
     QApplication.setApplicationDisplayName(TITLE)
+    QApplication.setApplicationVersion(read_version().full)
     app = cast(QApplication, QApplication.instance() or QApplication(sys.argv))
     app.setStyle('Fusion')
     app.setStyleSheet(load_stylesheet())

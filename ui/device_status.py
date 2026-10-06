@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from typing import cast
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QStandardItemModel
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
 
 from core.backend import GpuInfo
@@ -22,10 +25,12 @@ def gpu_tooltip(info: GpuInfo | None) -> str:
     if info is None:
         return tr('Detecting NVIDIA GPU…')
     if not info.available:
+        # No usable NVIDIA GPU is normal (laptop, AMD/Intel graphics, no driver): the app simply
+        # runs on the CPU, nothing to install. The reason is kept as a detail for support.
         lines = [
-            '<b>' + tr('GPU unavailable — processing runs on the CPU') + '</b>',
+            '<b>' + tr('No usable NVIDIA GPU — the app runs on the CPU. Nothing to install.') + '</b>',
             '',
-            tr_msg(info.reason or '') or tr('Unknown reason.'),
+            tr('Details: ') + (tr_msg(info.reason or '') or tr('Unknown reason.')),
         ]
         if info.name:
             lines.insert(1, f'GPU: {info.name}')
@@ -69,6 +74,8 @@ class DeviceStatus(QWidget):
         super().__init__(parent)
         self.info: GpuInfo | None = None
         self.settings = AdjustmentSettings()
+        self._preferred = 'gpu'  # the user's choice; the GPU is used only if it is usable
+        self._applying = False
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
@@ -88,13 +95,34 @@ class DeviceStatus(QWidget):
     def device(self) -> str:
         return self.combo.currentData()
 
+    def preferred_device(self) -> str:
+        """Device chosen by the user (saved), even if the GPU is unusable on this computer."""
+        return self._preferred
+
     def set_device(self, device: str) -> None:
-        self.combo.setCurrentIndex(0 if device == 'gpu' else 1)
+        self._preferred = 'cpu' if device == 'cpu' else 'gpu'
+        self._apply()
         self.refresh()
 
     def set_gpu_info(self, info: GpuInfo) -> None:
         self.info = info
+        self._apply()
         self.refresh()
+
+    def _apply(self) -> None:
+        """Select CPU silently when the GPU is unusable (the GPU item is disabled)."""
+        gpu_ok = self.info is None or self.info.available
+        item = cast(QStandardItemModel, self.combo.model()).item(0)
+        if item is not None:
+            item.setEnabled(gpu_ok)
+        self.combo.setItemData(
+            0, None if gpu_ok else tr('No usable NVIDIA GPU on this computer'), Qt.ItemDataRole.ToolTipRole
+        )
+        self._applying = True
+        try:
+            self.combo.setCurrentIndex(0 if gpu_ok and self._preferred == 'gpu' else 1)
+        finally:
+            self._applying = False
 
     def set_settings(self, settings: AdjustmentSettings) -> None:
         self.settings = settings
@@ -103,9 +131,6 @@ class DeviceStatus(QWidget):
     def effective_device(self) -> str:
         """Device that will actually run: GPU only if selected and usable."""
         return 'gpu' if self.device() == 'gpu' and self.info and self.info.available else 'cpu'
-
-    def gpu_unusable(self) -> bool:
-        return self.device() == 'gpu' and self.info is not None and not self.info.available
 
     def refresh(self) -> None:
         if self.device() == 'cpu':
@@ -127,5 +152,7 @@ class DeviceStatus(QWidget):
             self.chip.set_state('yellow', tr('⚠ GPU unavailable — using CPU'), gpu_tooltip(self.info))
 
     def _changed(self) -> None:
+        if not self._applying:
+            self._preferred = self.device()
         self.refresh()
         self.device_changed.emit(self.device())

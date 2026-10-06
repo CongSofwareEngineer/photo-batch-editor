@@ -139,6 +139,27 @@ The .exe is built with PyInstaller (`--onedir`, see
 machine; it needs neither Python nor the CUDA Toolkit, only the NVIDIA driver for GPU mode.
 The folder is about 1.5–3 GB because of the bundled CUDA/cuDNN libraries.
 
+**Version.** `version.json` holds the release version (`"version": "1.0.0"`, change it by hand)
+and a build number that `tools/bump_build.py` increases on every `build_windows.bat` /
+`build_mac.sh` run. The .exe shows it in *Properties › Details* (`1.0.0.12`), the installer is
+named `PhotoBatchEditor-Setup-1.0.0.12.exe`, the Mac app/dmg use it too.
+
+**Windows Defender / SmartScreen warnings.** An unsigned PyInstaller .exe is often flagged
+(false positive, e.g. `Trojan:Win32/Wacatac`) because the prebuilt PyInstaller bootloader is
+the same in every PyInstaller app, malware included. `build_windows.bat` therefore compiles
+the bootloader from source (`tools\build_bootloader.bat`, once per PyInstaller version). That
+needs the free Microsoft C++ Build Tools, installed once:
+
+```bat
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+Without them the build still works with the prebuilt bootloader (and prints a warning). If a
+build is still flagged, report it as a false positive (free) at
+<https://www.microsoft.com/wdsi/filesubmission>. SmartScreen (“Windows protected your PC”)
+appears for any unsigned app: *More info › Run anyway*, or right-click the file ›
+*Properties* › *Unblock*.
+
 ### macOS (MacBook)
 
 ```bash
@@ -149,7 +170,7 @@ chmod +x build_mac.sh dev.sh lint.sh   # once, if the files lost their "executab
 
 Creates `venv/` with Python 3.12/3.11 if missing (`PYTHON=/path/to/python3 ./build_mac.sh` to
 choose), runs the tests, copies the Mac `ffmpeg` into `ffmpeg/`, builds
-`dist/PhotoBatchEditor.app` (signed ad-hoc) and `dist/PhotoBatchEditor-1.0.0-<arch>.dmg` — open
+`dist/PhotoBatchEditor.app` (signed ad-hoc) and `dist/PhotoBatchEditor-<version>-<arch>.dmg` — open
 it and drag *Photo Batch Editor* into *Applications*.
 
 * The app is built for the CPU of the Mac that builds it: build on an M1–M4 Mac for Apple
@@ -165,7 +186,7 @@ it and drag *Photo Batch Editor* into *Applications*.
 build_installer.bat
 ```
 
-Packs `dist\PhotoBatchEditor` into `installer_output\PhotoBatchEditor-Setup-1.0.0.exe`
+Packs `dist\PhotoBatchEditor` into `installer_output\PhotoBatchEditor-Setup-<version>.exe`
 (Inno Setup 6, `installer.iss`; install it with `winget install JRSoftware.InnoSetup`).
 The installer (≈ 1.5 GB) installs to Program Files (or per-user without admin rights),
 adds Start Menu / optional desktop shortcuts, a “GPU check” shortcut (runs `--selftest`

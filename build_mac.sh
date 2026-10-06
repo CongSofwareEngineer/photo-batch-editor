@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PRODUCTION BUILD FOR macOS (MacBook) - run on a Mac (PyInstaller cannot build a Mac app on Windows).
-#   tests -> dist/PhotoBatchEditor.app -> dist/PhotoBatchEditor-<version>-<arch>.dmg
+#   tests -> build number +1 -> dist/PhotoBatchEditor.app -> dist/PhotoBatchEditor-<version>-<arch>.dmg
 #   ./build_mac.sh               full build
 #   ./build_mac.sh --skip-tests  skip pytest
 # The app is built for the CPU of this Mac: Apple Silicon (arm64, M1-M4) or Intel (x86_64).
@@ -8,7 +8,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="1.0.0"
 PY_BIN="${PYTHON:-}"
 if [ -z "$PY_BIN" ]; then
     for c in python3.12 python3.11 python3; do
@@ -37,6 +36,10 @@ echo "=== FFmpeg (Video editor) ==="
 
 echo "=== Icon ==="
 [ -f assets/app.icns ] || "$PY" tools/make_icns.py
+
+echo "=== Version ==="
+VERSION="$("$PY" tools/bump_build.py)"
+echo "Version $VERSION"
 
 echo "=== PyInstaller ==="
 "$PY" -m PyInstaller --noconfirm PhotoBatchEditor.spec

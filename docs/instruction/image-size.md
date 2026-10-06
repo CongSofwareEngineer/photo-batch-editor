@@ -1,7 +1,8 @@
-# Log: Image Size
+# Image Size
 
 - **Mục đích:** đổi kích thước ảnh giống hộp thoại Image Size của Photoshop.
 - **File:** `core/image_size.py`
+- **Changelog:** [../changelog/image-size.md](../changelog/image-size.md)
 
 ## Logic chính
 
@@ -10,7 +11,3 @@
 ## Test
 
 `tests/test_image_size.py`
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Ghi lại hiện trạng ban đầu.

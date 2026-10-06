@@ -1,9 +1,10 @@
-# Log: Chỉnh nhiều ảnh (batch)
+# Chỉnh nhiều ảnh (batch)
 
 - **Mục đích:** áp cùng một bộ chỉnh sửa cho cả thư mục ảnh.
 - **File:** `core/batch.py`, `core/scanner.py`, `core/pipeline.py`, `core/io_utils.py`,
   `ui/prepare_view.py`, `ui/run_view.py`, `ui/results_view.py`, `ui/file_list.py`,
   `ui/image_viewer.py`, `ui/workers.py`
+- **Changelog:** [../changelog/batch.md](../changelog/batch.md)
 
 ## Logic chính
 
@@ -25,11 +26,3 @@
 ## Test
 
 `tests/test_batch.py`, `tests/test_scanner.py`, `tests/test_io_utils.py`
-
-## Lịch sử thay đổi
-
-- 2026-10-03: Ghi lại hiện trạng ban đầu.
-- 2026-10-03: Thêm mục chuột phải "Mở trong Sửa ảnh đơn" (input + kết quả); đổi tên mục điều hướng thành
-  "Sửa hàng loạt" — vì có thêm trang Sửa ảnh đơn / Sửa video (xem photo-editor.md, video-editor.md).
-- 2026-10-03: Sửa lỗi kiểu do Pyright báo (không đổi hành vi): CLI `reconfigure` stdout qua `getattr`; danh sách kết
-  quả / trình xem ảnh bỏ qua dòng không có `output_path` khi tạo thumbnail / preload — xem code-format.md.
