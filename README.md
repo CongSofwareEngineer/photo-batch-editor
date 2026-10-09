@@ -96,6 +96,22 @@ pytest -q
 
 Tests marked `gpu` are skipped automatically on machines without a usable NVIDIA GPU.
 
+## Rust port (work in progress)
+
+The app is being ported to Rust in stages; the Python version above stays the one you ship.
+See `docs/instruction/rust-port.md` for the stage-by-stage status.
+
+```bash
+cd rust
+cargo test                 # core logic + CPU parts of the GUI
+cargo test --features sr   # adds the Super Resolution (ONNX) test
+cargo run -p pbe-gui       # the Rust GUI (egui + wgpu)
+```
+
+The Rust GUI reads the **same** `auth.json`, `state.json` and `presets` folder as the Python
+version, so don't run both at once. Text layers, the collage dialog, `.pbep` project files and
+video playback with sound are not ported yet.
+
 ## Development: live reload (no build)
 
 ```bat
@@ -292,6 +308,9 @@ tests/               pytest suite (synthetic images)
 ui/photo/            photo editor page (document + layers, renderer, canvas, tools, panels,
                      .pbep project files, collage dialog)
 ui/video/            video editor page (preview player, timeline, panels, text overlays)
+rust/                Rust port (see docs/instruction/rust-port.md)
+  core/              pbe-core: the Rust port of core/ (incl. photo/ and video/)
+  gui/               pbe-gui: the Rust GUI (egui + wgpu), binary photo-batch-editor
 tools/export_onnx.py ONNX export of the Super Resolution model
 tools/fetch_ffmpeg.py copies ffmpeg(.exe) into ffmpeg/ for the build
 tools/make_icns.py   assets/app.ico -> assets/app.icns (macOS icon)

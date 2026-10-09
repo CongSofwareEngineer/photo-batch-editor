@@ -42,8 +42,9 @@ impl Framebuffer {
     }
 
     pub fn clear(&mut self, color: [u8; 4]) {
-        for px in self.data.chunks_exact_mut(4) {
-            px.copy_from_slice(&color);
+        let (chunks, _) = self.data.as_chunks_mut::<4>();
+        for px in chunks {
+            *px = color;
         }
     }
 
@@ -52,7 +53,7 @@ impl Framebuffer {
         let cell = cell.max(1);
         for y in 0..self.h {
             for x in 0..self.w {
-                let c = if (x / cell + y / cell) % 2 == 0 { a } else { b };
+                let c = if (x / cell + y / cell).is_multiple_of(2) { a } else { b };
                 let i = (y * self.w + x) * 4;
                 self.data[i..i + 4].copy_from_slice(&c);
             }
@@ -70,9 +71,9 @@ impl Framebuffer {
             return;
         }
         let a = src[3] as u32;
-        for c in 0..3 {
+        for (c, &s) in src[..3].iter().enumerate() {
             let dst = self.data[i + c] as u32;
-            self.data[i + c] = ((src[c] as u32 * a + dst * (255 - a)) / 255) as u8;
+            self.data[i + c] = ((s as u32 * a + dst * (255 - a)) / 255) as u8;
         }
         let da = self.data[i + 3] as u32;
         self.data[i + 3] = (a + da * (255 - a) / 255).min(255) as u8;

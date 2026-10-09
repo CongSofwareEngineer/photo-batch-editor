@@ -5,6 +5,10 @@ version.workspace = true
 license.workspace = true
 description = "Photo Batch Editor — GUI (egui + wgpu), Rust port of the PySide6 ui/ package"
 
+[lib]
+name = "pbe_gui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "photo-batch-editor"
 path = "src/main.rs"
@@ -15,3 +19,6 @@ egui = "0.36.2"
 pbe-core = { path = "../core" }
 rfd = "0.17.2"
 serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

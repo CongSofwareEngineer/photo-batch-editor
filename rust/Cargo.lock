@@ -2052,6 +2052,7 @@ dependencies = [
  "pbe-core",
  "rfd",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

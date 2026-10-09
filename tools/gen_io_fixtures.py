@@ -24,7 +24,6 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from PIL import Image  # noqa: E402
 
 from core.io_utils import read_image  # noqa: E402
 from tests.conftest import (  # noqa: E402
@@ -67,7 +66,10 @@ def main() -> None:
     record('tiff16', save_tiff16(IO / 'tiff16.tif'))
     record('gray', save_gray(IO / 'gray.bmp'))
     for o in range(1, 9):
-        record(f'orient_{o}', save_jpeg_with_orientation(IO / f'orient_{o}.jpg', to_u8(make_photo_like(60, 90)), o))
+        record(
+            f'orient_{o}',
+            save_jpeg_with_orientation(IO / f'orient_{o}.jpg', to_u8(make_photo_like(60, 90)), o),
+        )
 
     (IO / 'io_manifest.json').write_text(
         json.dumps({'arrays': manifest}, indent=1, sort_keys=True) + '\n', encoding='utf-8'

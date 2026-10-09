@@ -3,6 +3,7 @@
 - **Mục đích:** yêu cầu đăng nhập cục bộ khi mở app.
 - **File:** `core/auth.py`, `ui/login_view.py`, `ui/sidebar.py`, `ui/settings_view.py`
 - **Changelog:** [../changelog/login.md](../changelog/login.md)
+- **Bản Rust:** logic → `rust/core/src/auth.rs`; trang đăng nhập → `rust/gui/src/login.rs` (dùng chung `auth.json` với bản Python). Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

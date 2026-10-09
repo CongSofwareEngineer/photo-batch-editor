@@ -5,7 +5,7 @@
 //! Khung xem trước lấy bằng FFmpeg (`-ss <t> -frames:v 1`) trên luồng nền rồi nạp vào
 //! framebuffer, nên không cần một bộ giải mã video riêng trong GUI.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
@@ -102,7 +102,7 @@ impl VideoEditorView {
         }
     }
 
-    pub fn open_path(&mut self, path: &PathBuf) {
+    pub fn open_path(&mut self, path: &Path) {
         match ffmpeg::probe(path) {
             Ok(info) => {
                 self.last_dir = path.parent().map(|p| p.to_path_buf());
@@ -909,7 +909,7 @@ impl VideoEditorView {
         if self.is_busy() {
             return;
         }
-        let default = default_output_path(std::path::Path::new(&p.source), &self.export_fmt);
+        let default = default_output_path(Path::new(&p.source), &self.export_fmt);
         let mut dialog = rfd::FileDialog::new().set_title(tr("Export")).set_file_name(
             default
                 .file_name()

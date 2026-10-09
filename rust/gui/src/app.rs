@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use egui::{Key, Ui};
 use pbe_core::auth::AuthStore;
 use pbe_core::i18n::{load_language, save_language, set_language};
-use pbe_core::paths::local_appdata_dir;
+use pbe_core::paths;
 use pbe_core::settings::AdjustmentSettings;
 
 use crate::batch::{BatchView, Screen};
@@ -23,9 +23,9 @@ pub const TITLE: &str = "Photo Batch Editor";
 const STATE_FILE: &str = "state.json";
 const AUTH_FILE: &str = "auth.json";
 
-/// `%LOCALAPPDATA%\PhotoBatchEditor` / `~/Library/Caches/PhotoBatchEditor`.
+/// Thư mục dữ liệu — dùng chung với bản Python (xem [`paths::app_data_dir`]).
 pub fn app_data_dir() -> PathBuf {
-    local_appdata_dir()
+    paths::app_data_dir()
 }
 
 /// Hộp thoại xác nhận đang mở.

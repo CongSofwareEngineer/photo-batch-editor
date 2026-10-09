@@ -9,3 +9,4 @@
   error khi code sai, sửa 134 → 0 lỗi kiểu có sẵn (chủ yếu khai báo kiểu; `timeline.scroll` →
   `view_start` vì đè method `QWidget.scroll`); `lint` chạy cả pyright; build chạy lint trước test.
 - 2026-10-06: Tách file log cũ `docs/code-format.md` thành `instruction/` (hiện trạng) + `changelog/` (lịch sử) — theo rule mới trong CLAUDE.md.
+- 2026-10-09 | Sửa | Format / lint: `tools/gen_io_fixtures.py` cắt dòng `record(f'orient_{o}', …)` theo Ruff và bỏ `from PIL import Image` không dùng — vì `./lint.sh --check` đang báo 1 file cần format + 1 lỗi import (file này được thêm ở commit trước mà chưa chạy lint).

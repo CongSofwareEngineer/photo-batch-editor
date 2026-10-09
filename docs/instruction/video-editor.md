@@ -12,6 +12,7 @@
     `video_editor_view.py` (trang + `ExportWorker` QThread)
   - `tools/fetch_ffmpeg.py`, `PhotoBatchEditor.spec`, `build_windows.bat`, `build_mac.sh`, `requirements.txt` (imageio-ffmpeg)
 - **Changelog:** [../changelog/video-editor.md](../changelog/video-editor.md)
+- **Bản Rust:** logic `core/video/` → `rust/core/src/video/`; GUI → `rust/gui/src/video.rs`. **Chưa** port: vẽ chữ lên video, phát video có tiếng (xem trước là khung tĩnh lấy bằng FFmpeg). Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

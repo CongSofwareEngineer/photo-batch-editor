@@ -5,6 +5,7 @@
 - **File:** `core/photo/collage.py` (hình học, không Qt), `ui/photo/collage_dialog.py` (hộp thoại + vẽ),
   mở từ `ui/photo/photo_editor_view.py` (công cụ L / menu "Tạo ảnh ghép mới…")
 - **Changelog:** [../changelog/collage.md](../changelog/collage.md)
+- **Bản Rust:** hình học ô → `rust/core/src/photo/collage.rs`. **Chưa** port: hộp thoại collage. Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

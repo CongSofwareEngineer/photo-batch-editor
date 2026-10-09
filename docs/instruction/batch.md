@@ -5,6 +5,7 @@
   `ui/prepare_view.py`, `ui/run_view.py`, `ui/results_view.py`, `ui/file_list.py`,
   `ui/image_viewer.py`, `ui/workers.py`
 - **Changelog:** [../changelog/batch.md](../changelog/batch.md)
+- **Bản Rust:** logic → `rust/core/src/batch.rs`; GUI 3 màn hình → `rust/gui/src/batch.rs`. Nhánh GPU không port (luôn chạy CPU). Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

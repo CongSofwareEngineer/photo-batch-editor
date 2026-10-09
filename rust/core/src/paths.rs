@@ -57,6 +57,34 @@ pub fn local_appdata_dir() -> PathBuf {
     root.join(APP_NAME)
 }
 
+/// Thư mục dữ liệu người dùng (auth.json, state.json, presets) — **cùng chỗ với bản Python**
+/// (`QStandardPaths.AppDataLocation`), để hai bản dùng chung tài khoản và thiết lập đã lưu:
+///
+/// * Windows: `%APPDATA%\PhotoBatchEditor`
+/// * macOS: `~/Library/Application Support/PhotoBatchEditor`
+/// * nơi khác: `$XDG_DATA_HOME/PhotoBatchEditor` hoặc `~/.local/share/PhotoBatchEditor`
+///
+/// Khác [`local_appdata_dir`] (chỗ đệm, có thể xoá mất).
+pub fn app_data_dir() -> PathBuf {
+    if let Ok(p) = env::var("PBE_APP_DATA") {
+        return PathBuf::from(p);
+    }
+    let root = if cfg!(target_os = "windows") {
+        match env::var("APPDATA") {
+            Ok(base) => PathBuf::from(base),
+            Err(_) => home_dir().join("AppData").join("Roaming"),
+        }
+    } else if cfg!(target_os = "macos") {
+        home_dir().join("Library").join("Application Support")
+    } else {
+        match env::var("XDG_DATA_HOME") {
+            Ok(base) if !base.is_empty() => PathBuf::from(base),
+            _ => home_dir().join(".local").join("share"),
+        }
+    };
+    root.join(APP_NAME)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,6 +94,37 @@ mod tests {
         let p = resource_path(["models", "x.onnx"]);
         assert!(p.ends_with("models/x.onnx"));
         assert_eq!(p, app_root().join("models").join("x.onnx"));
+    }
+
+    #[test]
+    fn app_data_dir_is_overridable() {
+        let prev = env::var("PBE_APP_DATA").ok();
+        env::set_var("PBE_APP_DATA", "/tmp/pbe-data");
+        assert_eq!(app_data_dir(), PathBuf::from("/tmp/pbe-data"));
+        match prev {
+            Some(v) => env::set_var("PBE_APP_DATA", v),
+            None => env::remove_var("PBE_APP_DATA"),
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_app_data_dir() {
+        // Phải trùng `QStandardPaths.AppDataLocation` của bản Python.
+        let prev_data = env::var("PBE_APP_DATA").ok();
+        let prev_home = env::var("HOME").ok();
+        env::remove_var("PBE_APP_DATA");
+        env::set_var("HOME", "/tmp/fakehome");
+        assert_eq!(
+            app_data_dir(),
+            PathBuf::from("/tmp/fakehome/Library/Application Support/PhotoBatchEditor")
+        );
+        if let Some(v) = prev_data {
+            env::set_var("PBE_APP_DATA", v);
+        }
+        if let Some(v) = prev_home {
+            env::set_var("HOME", v);
+        }
     }
 
     #[test]

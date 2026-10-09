@@ -5,7 +5,7 @@
 pub mod doc;
 pub mod render;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use egui::{Key, RichText, Ui};
 use pbe_core::photo::effects::{PhotoAdjust, ADJUST_SLIDERS, BLUR_MODES};
@@ -91,13 +91,13 @@ impl PhotoEditorView {
         self.doc.as_ref().is_some_and(|d| d.modified)
     }
 
-    pub fn open_path(&mut self, path: &PathBuf) {
+    pub fn open_path(&mut self, path: &Path) {
         match load_rgba(path) {
             Ok(img) => {
                 self.last_dir = path.parent().map(|p| p.to_path_buf());
                 let long = img.long_side().max(1);
                 self.preview_scale = (PREVIEW_LONG_SIDE as f64 / long as f64).min(1.0);
-                self.doc = Some(Document::new(img, Some(path.clone())));
+                self.doc = Some(Document::new(img, Some(path.to_path_buf())));
                 self.composite = None;
                 self.composite_rev = 0;
                 self.fit_requested = true;
@@ -289,12 +289,12 @@ impl PhotoEditorView {
                 decimals: 1,
             };
             let angle_changed = widgets::slider_row(ui, &straighten, &tr("Straighten"), &mut angle);
-            if changed || angle_changed {
-                if doc.state.background.adjust != adjust || doc.state.background.angle != angle {
-                    doc.push_undo("Adjust", Some("background_adjust"));
-                    doc.state.background.adjust = adjust;
-                    doc.state.background.angle = angle;
-                }
+            if (changed || angle_changed)
+                && (doc.state.background.adjust != adjust || doc.state.background.angle != angle)
+            {
+                doc.push_undo("Adjust", Some("background_adjust"));
+                doc.state.background.adjust = adjust;
+                doc.state.background.angle = angle;
             }
             if widgets::secondary(ui, &tr("Reset"), !adjust.is_default() || angle != 0.0).clicked() {
                 doc.push_undo("Adjust", None);

@@ -4,6 +4,7 @@
 - **File:** `core/presets.py`, `core/paths.py`, `presets_builtin/`, `ui/settings_view.py`,
   `ui/main_window.py`, `ui/sidebar.py`
 - **Changelog:** [../changelog/settings.md](../changelog/settings.md)
+- **Bản Rust:** logic → `rust/core/src/{settings,presets}.rs`; trang Settings → `rust/gui/src/settings_view.rs` (dùng chung thư mục `presets` với bản Python). Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

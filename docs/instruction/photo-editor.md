@@ -15,6 +15,7 @@
   - Dùng chung: `ui/main_window.py`, `ui/sidebar.py` (trang `photo`, Ctrl+2), `ui/icons.py` (icon công cụ),
     `ui/theme.qss` (mục "Photo / video editors"), `core/i18n_vi.py`
 - **Changelog:** [../changelog/photo-editor.md](../changelog/photo-editor.md)
+- **Bản Rust:** logic `core/photo/` → `rust/core/src/photo/`; GUI → `rust/gui/src/photo/` (egui + framebuffer wgpu). **Chưa** port: layer chữ, file dự án `.pbep`. Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 
