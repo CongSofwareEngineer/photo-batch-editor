@@ -1,9 +1,9 @@
 # GPU / CPU backend
 
 - **Mục đích:** tăng tốc bằng NVIDIA GPU, tự chuyển sang CPU khi không dùng được GPU.
-- **File:** `core/backend.py`, `ui/device_status.py`, `ui/prepare_view.py`, `ui/main_window.py`,
-  `requirements-cuda.txt`
+- **File:** `rust/core/src/backend.rs` (CPU). **Chưa** port: nhánh GPU CuPy và dò thiết bị — bản Rust luôn chạy CPU.
 - **Changelog:** [../changelog/gpu-cpu.md](../changelog/gpu-cpu.md)
+- **Ghi chú:** mã Python (`core/backend.py`, `ui/device_status.py`…) đã xoá. Phần mô tả GPU/fallback dưới đây là hành vi bản Python cũ; bản Rust hiện chỉ có CPU. Chi tiết port: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

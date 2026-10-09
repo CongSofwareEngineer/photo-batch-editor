@@ -1,12 +1,8 @@
 //! Văn bản UI tiếng Việt. Khoá = văn bản tiếng Anh dùng trong code (xem [`crate::i18n`]).
 //!
-//! Dữ liệu được sinh từ `core/i18n_vi.py` (nguồn chuẩn) và nhúng dưới dạng JSON để đảm bảo
-//! khớp 100% với bản Python. Chạy lại khi sửa `core/i18n_vi.py`:
-//! ```text
-//! python3 -c "import json; from core import i18n_vi; \
-//!   json.dump({'text': i18n_vi.TEXT, 'patterns': [list(p) for p in i18n_vi.MESSAGE_PATTERNS]}, \
-//!   open('rust/core/src/i18n_vi_data.json','w',encoding='utf-8'), ensure_ascii=False, indent=0)"
-//! ```
+//! Dữ liệu nằm trong `i18n_vi_data.json` và được nhúng bằng `include_str!`. File JSON này trước
+//! đây được sinh tự động từ `core/i18n_vi.py`; từ khi bản Python bị xoá thì sửa trực tiếp JSON
+//! (hoặc file này) khi cần thêm / sửa chuỗi.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;

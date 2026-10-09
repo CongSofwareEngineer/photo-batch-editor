@@ -1,49 +1,39 @@
 # Hỗ trợ macOS (MacBook)
 
-- **Mục đích:** app chạy được trên MacBook (Apple Silicon M1–M4 và Intel), cả từ source lẫn bản
-  đóng gói `.app` / `.dmg`. Windows 10/11 giữ nguyên như cũ.
-- **File:** `requirements.txt`, `requirements-cuda.txt`, `core/system.py` (mới), `core/io_utils.py`,
-  `core/paths.py`, `core/video/project.py`, `ui/photo/document.py`, `ui/photo/panels.py`, `ui/theme.qss`,
-  `ui/file_list.py`, `ui/results_view.py`, `ui/image_viewer.py`, `core/i18n_vi.py`,
-  `PhotoBatchEditor.spec`, `tools/fetch_ffmpeg.py`, `tools/make_icns.py` (mới), `assets/app.icns`,
-  `build_mac.sh`, `dev.sh`
+- **Mục đích:** app chạy được trên MacBook (Apple Silicon M1–M4 và Intel), cả từ source lẫn bản đóng
+  gói `.app`. Windows 10/11 chạy như cũ.
+- **File:** `rust/core/src/system.rs`, `rust/core/src/paths.rs`, `rust/core/src/io_utils.rs`,
+  `rust/core/src/video/ffmpeg.rs`, `rust/gui/src/theme.rs`, `assets/app.icns`, `build_rust_mac.sh`
 - **Changelog:** [../changelog/macos.md](../changelog/macos.md)
+- **Ghi chú:** mã Python (`core/system.py`, `ui/theme.qss`, `PhotoBatchEditor.spec`,
+  `tools/fetch_ffmpeg.py`, `tools/make_icns.py`, `build_mac.sh`…) đã xoá; bản triển khai hiện tại là Rust.
 
 ## Logic chính
 
-- **Thư viện:** trên macOS không có NVIDIA/CUDA → `requirements.txt` dùng environment marker:
-  `cupy-cuda12x` và `onnxruntime-gpu` chỉ cài khi `sys_platform != "darwin"`; trên Mac cài
-  `onnxruntime` thường (CPU). `requirements-cuda.txt` cũng có marker nên `pip install -r
-  requirements-dev.txt` chạy được trên cả hai hệ điều hành.
-- **GPU:** Mac luôn chạy CPU (NumPy/OpenCV). `detect_gpu()` báo "No NVIDIA GPU found" như máy
-  Windows không có card NVIDIA — không cần sửa logic backend.
-- **`core/system.py`:** `IS_WINDOWS`, `IS_MAC`, `DEFAULT_FONT_FAMILY` (Segoe UI / Helvetica Neue /
-  DejaVu Sans) — font mặc định cho layer chữ ảnh và chữ video.
-- **Mở thư mục / hiện file:** Windows `explorer /select,` · macOS `open -R` (Finder) và `open` ·
-  Linux `xdg-open`. Nhãn menu "Show in File Explorer" → "Show in Finder" trên Mac.
-- **Thư mục cache:** macOS `~/Library/Caches/PhotoBatchEditor`; dữ liệu người dùng vẫn theo
-  `QStandardPaths.AppDataLocation` (`~/Library/Application Support/...`).
-- **Phím tắt:** Qt tự đổi `Ctrl+…` thành `⌘ Cmd+…` trên Mac.
-- **Build:** `./build_mac.sh` (chạy TRÊN Mac) → test → ffmpeg (`ffmpeg/ffmpeg` từ `imageio-ffmpeg`
-  bản Mac) → PyInstaller → `dist/PhotoBatchEditor.app` → `dist/PhotoBatchEditor-<arch>.dmg`.
-  Spec dùng `BUNDLE(...)`, icon `assets/app.icns`, ffmpeg đưa vào dạng *binary* (vào
-  `Contents/Frameworks/ffmpeg/ffmpeg`, `app_root()` = `sys._MEIPASS` trỏ đúng chỗ này).
+- **Khác biệt hệ điều hành** nằm trong `rust/core/src/system.rs` (`IS_WINDOWS` / `IS_MAC`) — UI nằm ở
+  `rust/gui/`, không import vào `core`.
+- **GPU:** Mac không có NVIDIA/CUDA → luôn chạy CPU. Nhánh GPU CuPy của bản Python không port, nên điều
+  này đúng cho mọi nền tảng.
+- **Mở thư mục / hiện file:** Windows `explorer /select,` · macOS `open -R` (Finder) và `open` · Linux
+  `xdg-open`.
+- **Thư mục dữ liệu / cache:** `paths::app_data_dir()` = `~/Library/Application Support/PhotoBatchEditor`
+  trên macOS (khớp `QStandardPaths.AppDataLocation` cũ), cache ở `~/Library/Caches/PhotoBatchEditor`.
+- **Phím tắt:** egui dùng `⌘ Cmd` trên Mac (viết `Ctrl+…` trong code).
+- **Build:** `./build_rust_mac.sh` (chạy TRÊN Mac) → `cargo build -p pbe-gui --release` → `cargo bundle
+  --release` → `rust/target/release/bundle/osx/Photo Batch Editor.app`, chép `assets/`, `models/`,
+  `ffmpeg/` vào app.
 
 ## Lưu ý / giới hạn
 
-- PyInstaller không build chéo: bản Mac phải build trên Mac, bản Windows build trên Windows.
-- Kiến trúc theo Python dùng để build: build trên Mac M1–M4 → chỉ chạy Mac Apple Silicon; build trên
-  Mac Intel → chạy Mac Intel (và Apple Silicon qua Rosetta 2). Không làm universal2 vì wheel
-  numpy/opencv không có bản universal2.
+- Rust không build chéo: bản Mac build trên Mac, bản Windows build trên Windows.
+- Kiến trúc theo máy build: build trên M1–M4 ra `arm64`; build trên Intel ra `x86_64` (chạy được trên
+  Apple Silicon qua Rosetta 2). Không làm universal2.
 - App chưa ký Apple Developer ID / notarize → lần đầu mở: chuột phải › Open, hoặc
-  `xattr -dr com.apple.quarantine /Applications/PhotoBatchEditor.app`. Build tự ký ad-hoc.
+  `xattr -dr com.apple.quarantine "Photo Batch Editor.app"`. Script build ký ad-hoc.
 - Super Resolution trên Mac chạy CPU (chưa dùng CoreML).
-- Máy dev là Windows: phần Mac chỉ kiểm tra bằng test giả lập `sys.platform` — cần chạy thử
-  `./build_mac.sh` trên MacBook thật.
 
 ## Test
 
-- `tests/test_system.py`: requirements markers, mở Finder (`open -R`) khi giả lập darwin, font mặc
-  định, spec/script build tồn tại.
-- Thủ công trên Mac: `./dev.sh` (chạy từ source), `./build_mac.sh`, mở `.app`, chạy batch CPU, Sửa
-  ảnh/Sửa video (xuất MP4), "Show in Finder".
+- `rust/core/src/system.rs` (`#[cfg(test)]`) — bản port test `sys.platform` / đường dẫn theo OS cũ.
+- Thủ công trên Mac: `cd rust && cargo run -p pbe-gui` (chạy từ source), `./build_rust_mac.sh`, mở `.app`,
+  chạy batch CPU, Sửa ảnh/Sửa video (xuất MP4), "Show in Finder".

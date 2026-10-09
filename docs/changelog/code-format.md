@@ -1,4 +1,4 @@
-# Changelog: Format / lint / type check code (Ruff + Pyright) — "ESLint cho Python"
+# Changelog: Format / lint code (Rust: rustfmt + clippy)
 
 > Hiện trạng logic: [../instruction/code-format.md](../instruction/code-format.md)
 
@@ -10,3 +10,4 @@
   `view_start` vì đè method `QWidget.scroll`); `lint` chạy cả pyright; build chạy lint trước test.
 - 2026-10-06: Tách file log cũ `docs/code-format.md` thành `instruction/` (hiện trạng) + `changelog/` (lịch sử) — theo rule mới trong CLAUDE.md.
 - 2026-10-09 | Sửa | Format / lint: `tools/gen_io_fixtures.py` cắt dòng `record(f'orient_{o}', …)` theo Ruff và bỏ `from PIL import Image` không dùng — vì `./lint.sh --check` đang báo 1 file cần format + 1 lỗi import (file này được thêm ở commit trước mà chưa chạy lint).
+- 2026-10-09 | Sửa | Format / lint: đổi từ Ruff + Pyright (Python) sang `cargo fmt` + `cargo clippy` (Rust); xoá `pyproject.toml`, `lint.bat`, `lint.sh` cùng bản Python, cập nhật `.vscode` sang rust-analyzer — vì đã chuyển hẳn sang Rust, bộ lint Python không còn dùng.

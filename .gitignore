@@ -1,16 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-venv/
-.venv/
-.pytest_cache/
-.ruff_cache/
+# Rust build output
+target/
 
-# Build output (build_windows.bat / build_mac.sh)
-build/
-dist/
-installer_output/
-# ffmpeg binary copied from the imageio-ffmpeg pip package by tools/fetch_ffmpeg.py
+# ffmpeg binary (not committed; placed here for the Video editor)
 ffmpeg/
 
 # Local / OS files

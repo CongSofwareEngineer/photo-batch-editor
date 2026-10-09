@@ -4,18 +4,16 @@
   vùng làm mờ, cắt, xoay / lật, chỉnh màu, hoàn tác ≥ 30 bước, xuất JPEG/PNG, lưu file dự án
   `.pbep` (giữ layer) để mở lại sửa tiếp. Ảnh gốc không bao giờ bị ghi đè.
 - **File:**
-  - `core/photo/` (không import Qt): `history.py` (undo/redo snapshot), `geometry.py` (zoom 10–1600 %,
+  - `rust/core/src/photo/` (không UI): `history.rs` (undo/redo snapshot), `geometry.rs` (zoom 10–1600 %,
     zoom tại con trỏ, khung crop theo tỉ lệ, xoay 90° / lật toạ độ, cover_scale cho xoay tự do),
-    `effects.py` (blur / pixelate NumPy-OpenCV, `PhotoAdjust` → `AdjustmentSettings`),
-    `image_io.py` (đọc RGBA giữ trong suốt, ghi JPEG/PNG, thư mục `editor`), `collage.py` (xem collage.md)
-  - `ui/photo/`: `document.py` (Document + TextLayer / ImageLayer / BlurLayer + Background),
-    `render.py` (vẽ bằng QPainter, cache nền đã chỉnh + cache vùng mờ), `canvas.py` (zoom / pan),
-    `tools.py` (Select, Move, Text, Crop, Blur), `panels.py` (bảng Layer + thuộc tính),
-    `project_io.py` (`.pbep`), `photo_editor_view.py` (trang, menu trên, thanh trạng thái, export)
-  - Dùng chung: `ui/main_window.py`, `ui/sidebar.py` (trang `photo`, Ctrl+2), `ui/icons.py` (icon công cụ),
-    `ui/theme.qss` (mục "Photo / video editors"), `core/i18n_vi.py`
+    `effects.rs` (blur / pixelate, `PhotoAdjust` → `AdjustmentSettings`),
+    `image_io.rs` (đọc RGBA giữ trong suốt, ghi JPEG/PNG, thư mục `editor`), `collage.rs` (xem collage.md)
+  - `rust/gui/src/photo/`: `mod.rs` / `doc.rs` (Document + ImageLayer / BlurLayer + Background),
+    `render.rs` (ghép framebuffer CPU → texture wgpu, cache nền đã chỉnh + cache vùng mờ),
+    `mod.rs` (zoom / pan, công cụ Select, Move, Crop, Blur), panel layer + thuộc tính, export
+  - Dùng chung: `rust/gui/src/app.rs`, `sidebar.rs` (trang photo), `theme.rs`, `rust/core/src/i18n*`
 - **Changelog:** [../changelog/photo-editor.md](../changelog/photo-editor.md)
-- **Bản Rust:** logic `core/photo/` → `rust/core/src/photo/`; GUI → `rust/gui/src/photo/` (egui + framebuffer wgpu). **Chưa** port: layer chữ, file dự án `.pbep`. Chi tiết: [rust-port.md](rust-port.md).
+- **Ghi chú:** mã Python (`core/photo/`, `ui/photo/`) đã xoá; logic → `rust/core/src/photo/`; GUI → `rust/gui/src/photo/` (egui + framebuffer wgpu). **Chưa** port: layer chữ, file dự án `.pbep`. Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 
@@ -75,11 +73,11 @@
 
 ## Test
 
-- `tests/test_photo_core.py`: history (40 bước, gộp key, giới hạn), zoom tại con trỏ, crop theo tỉ lệ,
-  xoay/lật toạ độ, cover_scale, pixelate / blur, chỉnh ảnh = đúng pipeline batch, đọc RGBA, ghi JPEG/PNG,
-  đường dẫn `editor`, đường dẫn tiếng Việt.
-- `tests/test_photo_editor.py` (Qt offscreen): vẽ chữ tiếng Việt, blur / pixelate / cọ, ẩn layer, 35 bước undo,
-  crop / xoay / lật dời layer, bản xem trước + bản đầy đủ chạy nền, `.pbep` lưu/mở giống hệt, zoom giữ điểm
-  dưới con trỏ, kéo chọn / đổi cỡ (Shift) / xoay, crop 1:1 + Enter, công cụ làm mờ, mở ảnh + xuất vào `editor`.
-- Thủ công: `dev.bat` → trang Sửa ảnh đơn (Ctrl+2): mở ảnh lớn (> 20 MP), Ctrl+lăn zoom, Space+kéo, thêm chữ có
-  dấu, chèn PNG trong suốt, che mặt bằng pixelate, cắt 16:9, Ctrl+Z 30 lần, xuất JPEG/PNG, lưu và mở lại `.pbep`.
+- `rust/core/src/photo/*.rs` (`#[cfg(test)]`): history (gộp key, giới hạn), zoom tại con trỏ, crop theo tỉ
+  lệ, xoay/lật toạ độ, cover_scale, pixelate / blur, chỉnh ảnh = đúng pipeline batch, đọc RGBA, ghi
+  JPEG/PNG, đường dẫn `editor` — bản port của `tests/test_photo_core.py` cũ.
+- `rust/gui/tests/cpu_render.rs` (`cargo test -p pbe-gui`): framebuffer trộn alpha, ghép tài liệu, crop +
+  xoay 90° + lật, undo/redo — bản port phần CPU của `tests/test_photo_editor.py` cũ.
+- Thủ công: `cargo run -p pbe-gui` → trang Sửa ảnh đơn: mở ảnh lớn (> 20 MP), Ctrl+lăn zoom, Space+kéo,
+  chèn PNG trong suốt, che mặt bằng pixelate, cắt 16:9, Ctrl+Z nhiều lần, xuất JPEG/PNG.
+  (Layer chữ và `.pbep` chưa port.)

@@ -1,10 +1,10 @@
 # Setting (preset) & trang Settings
 
 - **Mục đích:** lưu và quản lý nhiều bộ chỉnh sửa để dùng lại.
-- **File:** `core/presets.py`, `core/paths.py`, `presets_builtin/`, `ui/settings_view.py`,
-  `ui/main_window.py`, `ui/sidebar.py`
+- **File:** `rust/core/src/presets.rs`, `rust/core/src/settings.rs`, `rust/core/src/paths.rs`,
+  `presets_builtin/`, `rust/gui/src/settings_view.rs`
 - **Changelog:** [../changelog/settings.md](../changelog/settings.md)
-- **Bản Rust:** logic → `rust/core/src/{settings,presets}.rs`; trang Settings → `rust/gui/src/settings_view.rs` (dùng chung thư mục `presets` với bản Python). Chi tiết: [rust-port.md](rust-port.md).
+- **Ghi chú:** mã Python (`core/presets.py`, `ui/settings_view.py`…) đã xoá; logic → `rust/core/src/{settings,presets}.rs`; trang Settings → `rust/gui/src/settings_view.rs`. Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

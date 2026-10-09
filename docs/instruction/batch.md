@@ -1,11 +1,10 @@
 # Chỉnh nhiều ảnh (batch)
 
 - **Mục đích:** áp cùng một bộ chỉnh sửa cho cả thư mục ảnh.
-- **File:** `core/batch.py`, `core/scanner.py`, `core/pipeline.py`, `core/io_utils.py`,
-  `ui/prepare_view.py`, `ui/run_view.py`, `ui/results_view.py`, `ui/file_list.py`,
-  `ui/image_viewer.py`, `ui/workers.py`
+- **File:** `rust/core/src/batch.rs`, `rust/core/src/scanner.rs`, `rust/core/src/pipeline.rs`,
+  `rust/core/src/io_utils.rs`, `rust/gui/src/batch.rs`
 - **Changelog:** [../changelog/batch.md](../changelog/batch.md)
-- **Bản Rust:** logic → `rust/core/src/batch.rs`; GUI 3 màn hình → `rust/gui/src/batch.rs`. Nhánh GPU không port (luôn chạy CPU). Chi tiết: [rust-port.md](rust-port.md).
+- **Ghi chú:** mã Python đã xoá; logic → `rust/core/src/batch.rs`; GUI 3 màn hình → `rust/gui/src/batch.rs`. Nhánh GPU không port (luôn chạy CPU). Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

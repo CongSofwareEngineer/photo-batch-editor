@@ -1,19 +1,11 @@
 {
-  // "ESLint for Python" — rules live in pyproject.toml:
-  //  - Ruff extension (charliermarsh.ruff): yellow warnings while typing (whitespace, unused or
-  //    unsorted imports, double quotes, common bugs); red for syntax errors / undefined names.
-  //    On save: format (single quotes) + auto-fix + sort imports.
-  //  - Pylance (ms-python.vscode-pylance, Pyright): red errors for wrong code (unknown attribute,
-  //    wrong number of arguments, missing import, ...).
-  // Same checks from the command line: lint.bat / ./lint.sh
-  "[python]": {
-    "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": {
-      "source.fixAll.ruff": "explicit",
-      "source.organizeImports.ruff": "explicit"
-    }
+  // Rust project — formatting/lint via rust-analyzer (rustfmt + clippy).
+  // Command line: `cd rust && cargo fmt` and `cargo clippy --all-targets`.
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true
   },
+  "rust-analyzer.check.command": "clippy",
   "[json]": {
     "editor.defaultFormatter": "vscode.json-language-features",
     "editor.formatOnSave": true
@@ -22,22 +14,11 @@
     "editor.defaultFormatter": "vscode.json-language-features",
     "editor.formatOnSave": true
   },
-  "ruff.nativeServer": "on",
-  "ruff.importStrategy": "fromEnvironment",
-  "ruff.lint.enable": true,
-  "ruff.organizeImports": true,
-  "ruff.showSyntaxErrors": true,
-  "python.languageServer": "Pylance",
-  "python.analysis.diagnosticMode": "workspace",
-  "python.analysis.autoImportCompletions": true,
-  "python.defaultInterpreterPath": "${workspaceFolder}/venv",
-  "editor.rulers": [110],
+  "editor.rulers": [100],
   "files.eol": "auto",
   "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
   "files.exclude": {
-    "**/__pycache__": true,
-    ".pytest_cache": true,
-    ".ruff_cache": true
+    "**/target": true
   }
 }

@@ -1,15 +1,18 @@
 # Port sang Rust
 
-- **Mục đích:** Chuyển toàn bộ app (hiện viết Python + PyQt6) sang Rust, **giữ nguyên tính năng**. Làm
+- **Mục đích:** Chuyển toàn bộ app (trước đây viết Python + PyQt6) sang Rust, **giữ nguyên tính năng**. Làm
   theo giai đoạn để mỗi bước đều build được và `cargo test` xanh, tránh viết lại một lần rồi không chạy.
 - **File:** mã Rust nằm trong thư mục `rust/` (Cargo workspace: crate `core` = `pbe-core`, crate `gui` =
-  `pbe-gui` + binary `photo-batch-editor`), không đụng tới code Python đang chạy cho tới khi phần Rust
-  tương ứng đã xong và test khớp.
+  `pbe-gui` + binary `photo-batch-editor`).
 - **Changelog:** [../changelog/rust-port.md](../changelog/rust-port.md)
 
 ## Logic chính
 
-- **Vì sao theo giai đoạn:** app là desktop PyQt6 ~20.500 dòng; GUI phải viết lại hoàn toàn (Qt không map
+- **Trạng thái chuyển đổi:** bản Python (`core/`, `ui/`, `tests/`, `main.py`, `dev.py`, các script build)
+  **đã được xoá hẳn** — Rust là codebase **duy nhất**; `cargo` trong `rust/` là nguồn chuẩn (test, build).
+  Các phần GUI chưa port (layer chữ, vẽ chữ lên video, hộp thoại collage, `.pbep`, phát video có tiếng,
+  xem ảnh toàn màn hình, khay thông báo, thumbnail) hiện **thiếu** — xem bảng GĐ5 bên dưới.
+- **Vì sao theo giai đoạn:** app Python cũ là desktop PyQt6 ~20.500 dòng; GUI phải viết lại hoàn toàn (Qt không map
   1-1 sang Rust). Rủi ro lớn nhất nằm ở GUI và các phần phụ thuộc thư viện C (OpenCV, ONNX Runtime, PIL,
   FFmpeg). Vì vậy port `core/` (logic thuần, test được) trước; GUI chọn framework và làm sau.
 - **Workspace Rust:** `rust/` chứa crate thư viện `pbe-core` (tương ứng `core/` của Python) và crate
@@ -40,12 +43,13 @@
 **GĐ1–4 đã hoàn tất:** `cargo test` xanh (95 unit test + 26 integration test) + `cargo test --features sr`
 (thêm 1 test SR ONNX). Mỗi module kèm test phản chiếu test Python.
 
-- Dữ liệu i18n tiếng Việt **sinh tự động** từ `core/i18n_vi.py` → `rust/core/src/i18n_vi_data.json`
-  (nhúng bằng `include_str!`), để khớp 100%.
-- Số học ảnh được chứng minh tương đương bằng **fixture tham chiếu** sinh từ bản Python (NumPy/OpenCV/
-  ONNX): chạy `venv/bin/python tools/gen_rust_fixtures.py` (backend + adjustments + pipeline) và
-  `venv/bin/python tools/gen_io_fixtures.py` (ảnh + thư mục batch). Fixture nằm ở
-  `rust/core/tests/fixtures/`. Test Rust nạp cùng input, tự tính, so với output Python trong sai số test.
+- Dữ liệu i18n tiếng Việt nằm trong `rust/core/src/i18n_vi_data.json` (nhúng bằng `include_str!`).
+  Trước đây dữ liệu này **sinh tự động** từ `core/i18n_vi.py`; sau khi xoá bản Python thì sửa tay file
+  JSON (hoặc sửa `i18n_vi.rs`).
+- Số học ảnh được chứng minh tương đương với bản Python cũ bằng **fixture tham chiếu** (đã sinh sẵn và
+  commit ở `rust/core/tests/fixtures/`; các tool sinh fixture `tools/gen_rust_fixtures.py` /
+  `tools/gen_io_fixtures.py` đã bị xoá cùng bản Python). Test Rust nạp cùng input, tự tính, rồi so với
+  output Python trong sai số test.
 - Super Resolution để sau feature `sr` (mặc định tắt) nên `core` không kéo ONNX runtime khi không cần:
   `cargo test --features sr`. `pipeline::process` nhận `Option<&dyn Upscaler>`; `enhance::SuperResolver`
   là cài đặt. Nhánh GPU (CuPy) và resample khớp-từng-bit với OpenCV cho cubic/lanczos là phần tinh chỉnh
@@ -114,8 +118,8 @@
 - **Chữ (text) là phần chặn chính của GUI:** vẽ chữ có dấu tiếng Việt lên pixel cần một bộ rasterize font
   trong Rust (`cosmic-text` + font hệ thống). Vì vậy layer chữ của photo editor và việc vẽ chữ lên video
   **chưa** port; dữ liệu chữ của dự án video vẫn giữ (thêm / sửa / xoá được), chỉ không xuất ra video.
-- GUI đọc / ghi cùng `auth.json`, `state.json`, thư mục `presets` với bản Python. Chạy **song song** hai bản
-  cùng lúc có thể ghi đè state của nhau — nên đóng bản kia trước khi chạy bản này.
+- GUI đọc / ghi `auth.json`, `state.json`, thư mục `presets` trong thư mục dữ liệu chung
+  (`paths::app_data_dir()`) — dữ liệu người dùng của bản Python cũ vẫn dùng được.
 - Xem trước video là **khung tĩnh** lấy bằng `ffmpeg -ss <t> -frames:v 1` trên luồng nền (chưa phát có tiếng).
 - Nhánh GPU (CuPy) không port → GUI Rust luôn chạy CPU; chưa có phần chọn thiết bị.
 
@@ -130,6 +134,5 @@
 - `cargo test --test video_export` — xuất video thật bằng FFmpeg (probe, cắt + nhạc + overlay, tắt tiếng,
   huỷ không để lại file). Tự bỏ qua khi máy không có FFmpeg.
 - Chạy thử GUI: `cd rust && cargo run -p pbe-gui`.
-- Đối chiếu từng test Rust với test Python tương ứng trong `tests/` (vd. `tests/test_settings`→ không có,
-  nằm trong `test_presets.py`/`test_image_size.py`; `tests/test_scanner.py`; `tests/test_auth.py`;
-  `tests/test_i18n.py`; `tests/test_version.py`).
+- Bộ test Python cũ (`tests/`, `pytest -q`) **đã bị xoá** cùng bản Python. Các test Rust là bản port của
+  chúng (cùng input → cùng kết quả trong sai số cho phép), đối chiếu với fixture đã commit.

@@ -1,4 +1,4 @@
 {
-  "recommendations": ["charliermarsh.ruff", "ms-python.python", "ms-python.vscode-pylance"],
-  "unwantedRecommendations": ["dbaeumer.vscode-eslint"]
+  "recommendations": ["rust-lang.rust-analyzer"],
+  "unwantedRecommendations": ["charliermarsh.ruff", "ms-python.python", "dbaeumer.vscode-eslint"]
 }

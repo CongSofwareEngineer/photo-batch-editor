@@ -1,9 +1,10 @@
 # 15 chỉnh sửa kiểu Camera Raw
 
 - **Mục đích:** các thanh chỉnh ảnh đặt tên giống Camera Raw.
-- **File:** `core/adjustments.py`, `core/settings.py`, `core/pipeline.py`,
-  `ui/adjustment_panel.py`, `ui/preview.py`
+- **File:** `rust/core/src/adjustments.rs`, `rust/core/src/settings.rs`, `rust/core/src/pipeline.rs`,
+  `rust/gui/src/adjust.rs`, `rust/gui/src/preview.rs`
 - **Changelog:** [../changelog/adjustments.md](../changelog/adjustments.md)
+- **Ghi chú:** mã Python (`core/adjustments.py`, `ui/adjustment_panel.py`…) đã xoá; bản triển khai hiện tại là Rust. Nhánh GPU không port. Chi tiết port: [rust-port.md](rust-port.md).
 
 ## Logic chính
 

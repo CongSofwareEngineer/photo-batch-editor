@@ -22,3 +22,14 @@ serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
+
+[package.metadata.bundle]
+name = "Photo Batch Editor"
+identifier = "com.photobatcheditor.app"
+icon = ["../../assets/icon.icns", "../../assets/icon.png"]
+resources = ["../../assets", "../../models", "../../ffmpeg", "README.txt"]
+copyright = "Copyright © Photo Batch Editor"
+category = "Graphics and Design"
+short_description = "Photo Batch Editor"
+long_description = "Batch edit photos and edit single photos/videos with filters, adjustments, and effects."
+osx_minimum_system_version = "10.15"

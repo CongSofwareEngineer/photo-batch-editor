@@ -2,10 +2,9 @@
 
 - **Mục đích:** tạo ảnh ghép từ nhiều ảnh theo mẫu bố cục, chỉnh khoảng cách, màu nền, bo góc, kéo ảnh trong
   từng ô để căn vị trí; kết quả mở trong Sửa ảnh đơn như một ảnh mới (thêm chữ, xuất… như bình thường).
-- **File:** `core/photo/collage.py` (hình học, không Qt), `ui/photo/collage_dialog.py` (hộp thoại + vẽ),
-  mở từ `ui/photo/photo_editor_view.py` (công cụ L / menu "Tạo ảnh ghép mới…")
+- **File:** `rust/core/src/photo/collage.rs` (hình học, không UI). Hộp thoại collage (`ui/photo/collage_dialog.py` cũ) **chưa** port.
 - **Changelog:** [../changelog/collage.md](../changelog/collage.md)
-- **Bản Rust:** hình học ô → `rust/core/src/photo/collage.rs`. **Chưa** port: hộp thoại collage. Chi tiết: [rust-port.md](rust-port.md).
+- **Ghi chú:** mã Python đã xoá; hình học ô → `rust/core/src/photo/collage.rs`. **Chưa** port: hộp thoại collage. Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
 
