@@ -1,0 +1,31 @@
+{
+ "arrays": {
+  "sr_in": {
+   "dtype": "f32",
+   "file": "sr_in.bin",
+   "shape": [
+    37,
+    53,
+    3
+   ]
+  },
+  "sr_out_2x": {
+   "dtype": "f32",
+   "file": "sr_out_2x.bin",
+   "shape": [
+    74,
+    106,
+    3
+   ]
+  },
+  "sr_out_4x": {
+   "dtype": "f32",
+   "file": "sr_out_4x.bin",
+   "shape": [
+    148,
+    212,
+    3
+   ]
+  }
+ }
+}

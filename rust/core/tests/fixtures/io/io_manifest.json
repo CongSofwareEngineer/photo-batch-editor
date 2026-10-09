@@ -1,0 +1,112 @@
+{
+ "arrays": {
+  "gray": {
+   "dtype": "u8",
+   "file": "gray.bmp",
+   "shape": [
+    40,
+    50,
+    3
+   ]
+  },
+  "orient_1": {
+   "dtype": "u8",
+   "file": "orient_1.jpg",
+   "shape": [
+    60,
+    90,
+    3
+   ]
+  },
+  "orient_2": {
+   "dtype": "u8",
+   "file": "orient_2.jpg",
+   "shape": [
+    60,
+    90,
+    3
+   ]
+  },
+  "orient_3": {
+   "dtype": "u8",
+   "file": "orient_3.jpg",
+   "shape": [
+    60,
+    90,
+    3
+   ]
+  },
+  "orient_4": {
+   "dtype": "u8",
+   "file": "orient_4.jpg",
+   "shape": [
+    60,
+    90,
+    3
+   ]
+  },
+  "orient_5": {
+   "dtype": "u8",
+   "file": "orient_5.jpg",
+   "shape": [
+    90,
+    60,
+    3
+   ]
+  },
+  "orient_6": {
+   "dtype": "u8",
+   "file": "orient_6.jpg",
+   "shape": [
+    90,
+    60,
+    3
+   ]
+  },
+  "orient_7": {
+   "dtype": "u8",
+   "file": "orient_7.jpg",
+   "shape": [
+    90,
+    60,
+    3
+   ]
+  },
+  "orient_8": {
+   "dtype": "u8",
+   "file": "orient_8.jpg",
+   "shape": [
+    90,
+    60,
+    3
+   ]
+  },
+  "png_alpha": {
+   "dtype": "u8",
+   "file": "png_alpha.png",
+   "shape": [
+    40,
+    50,
+    3
+   ]
+  },
+  "png_rgb": {
+   "dtype": "u8",
+   "file": "png_rgb.png",
+   "shape": [
+    30,
+    40,
+    3
+   ]
+  },
+  "tiff16": {
+   "dtype": "u16",
+   "file": "tiff16.tif",
+   "shape": [
+    40,
+    50,
+    3
+   ]
+  }
+ }
+}

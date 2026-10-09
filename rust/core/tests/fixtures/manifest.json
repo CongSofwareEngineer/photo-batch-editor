@@ -1,0 +1,377 @@
+{
+ "arrays": {
+  "adj_f32_all": {
+   "dtype": "f32",
+   "file": "adj_f32_all.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_color": {
+   "dtype": "f32",
+   "file": "adj_f32_color.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_detail_clarity_sharpen": {
+   "dtype": "f32",
+   "file": "adj_f32_detail_clarity_sharpen.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_detail_noise": {
+   "dtype": "f32",
+   "file": "adj_f32_detail_noise.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_effects_vignette": {
+   "dtype": "f32",
+   "file": "adj_f32_effects_vignette.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_identity": {
+   "dtype": "f32",
+   "file": "adj_f32_identity.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_tone_local": {
+   "dtype": "f32",
+   "file": "adj_f32_tone_local.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_tone_pointwise": {
+   "dtype": "f32",
+   "file": "adj_f32_tone_pointwise.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_f32_white_balance": {
+   "dtype": "f32",
+   "file": "adj_f32_white_balance.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_all": {
+   "dtype": "f32",
+   "file": "adj_u8in_all.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_color": {
+   "dtype": "f32",
+   "file": "adj_u8in_color.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_detail_clarity_sharpen": {
+   "dtype": "f32",
+   "file": "adj_u8in_detail_clarity_sharpen.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_detail_noise": {
+   "dtype": "f32",
+   "file": "adj_u8in_detail_noise.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_effects_vignette": {
+   "dtype": "f32",
+   "file": "adj_u8in_effects_vignette.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_identity": {
+   "dtype": "f32",
+   "file": "adj_u8in_identity.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_tone_local": {
+   "dtype": "f32",
+   "file": "adj_u8in_tone_local.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_tone_pointwise": {
+   "dtype": "f32",
+   "file": "adj_u8in_tone_pointwise.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "adj_u8in_white_balance": {
+   "dtype": "f32",
+   "file": "adj_u8in_white_balance.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "block_mean_f4": {
+   "dtype": "f32",
+   "file": "block_mean_f4.bin",
+   "shape": [
+    12,
+    16
+   ]
+  },
+  "block_mean_f5_pad": {
+   "dtype": "f32",
+   "file": "block_mean_f5_pad.bin",
+   "shape": [
+    10,
+    13
+   ]
+  },
+  "blur_sigma_1_0": {
+   "dtype": "f32",
+   "file": "blur_sigma_1_0.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "blur_sigma_20_0": {
+   "dtype": "f32",
+   "file": "blur_sigma_20_0.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "blur_sigma_2_5": {
+   "dtype": "f32",
+   "file": "blur_sigma_2_5.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "blur_sigma_8_0": {
+   "dtype": "f32",
+   "file": "blur_sigma_8_0.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "box_r1": {
+   "dtype": "f32",
+   "file": "box_r1.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "box_r3": {
+   "dtype": "f32",
+   "file": "box_r3.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "box_r7": {
+   "dtype": "f32",
+   "file": "box_r7.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "guided_r4_eps9e-4": {
+   "dtype": "f32",
+   "file": "guided_r4_eps9e-4.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "img_f32": {
+   "dtype": "f32",
+   "file": "img_f32.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "img_u8": {
+   "dtype": "u8",
+   "file": "img_u8.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "plane": {
+   "dtype": "f32",
+   "file": "plane.bin",
+   "shape": [
+    48,
+    64
+   ]
+  },
+  "proc_u8_all": {
+   "dtype": "u8",
+   "file": "proc_u8_all.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_color": {
+   "dtype": "u8",
+   "file": "proc_u8_color.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_detail_clarity_sharpen": {
+   "dtype": "u8",
+   "file": "proc_u8_detail_clarity_sharpen.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_detail_noise": {
+   "dtype": "u8",
+   "file": "proc_u8_detail_noise.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_effects_vignette": {
+   "dtype": "u8",
+   "file": "proc_u8_effects_vignette.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_identity": {
+   "dtype": "u8",
+   "file": "proc_u8_identity.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_tone_local": {
+   "dtype": "u8",
+   "file": "proc_u8_tone_local.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_tone_pointwise": {
+   "dtype": "u8",
+   "file": "proc_u8_tone_pointwise.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "proc_u8_white_balance": {
+   "dtype": "u8",
+   "file": "proc_u8_white_balance.bin",
+   "shape": [
+    60,
+    80,
+    3
+   ]
+  },
+  "resize_linear_19x23": {
+   "dtype": "f32",
+   "file": "resize_linear_19x23.bin",
+   "shape": [
+    19,
+    23
+   ]
+  },
+  "resize_linear_97x131": {
+   "dtype": "f32",
+   "file": "resize_linear_97x131.bin",
+   "shape": [
+    97,
+    131
+   ]
+  },
+  "upscale_f3": {
+   "dtype": "f32",
+   "file": "upscale_f3.bin",
+   "shape": [
+    48,
+    64
+   ]
+  }
+ }
+}

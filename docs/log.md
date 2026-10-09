@@ -19,6 +19,7 @@
 | Sửa ảnh đơn (canvas, layer, công cụ, xuất, file dự án) | [instruction/photo-editor.md](instruction/photo-editor.md) | [changelog/photo-editor.md](changelog/photo-editor.md) |
 | Cắt ghép layout (collage) | [instruction/collage.md](instruction/collage.md) | [changelog/collage.md](changelog/collage.md) |
 | Sửa video (FFmpeg: cắt, tắt tiếng, chữ, nhạc, xuất) | [instruction/video-editor.md](instruction/video-editor.md) | [changelog/video-editor.md](changelog/video-editor.md) |
+| Port sang Rust (chuyển toàn bộ app sang Rust, theo giai đoạn) | [instruction/rust-port.md](instruction/rust-port.md) | [changelog/rust-port.md](changelog/rust-port.md) |
 
 ## Thêm logic mới
 

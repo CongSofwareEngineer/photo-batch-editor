@@ -1,0 +1,42 @@
+{
+ "IMG_000.png": {
+  "height": 60,
+  "width": 80
+ },
+ "IMG_001.png": {
+  "height": 64,
+  "width": 80
+ },
+ "IMG_002.png": {
+  "height": 68,
+  "width": 80
+ },
+ "IMG_003.png": {
+  "height": 72,
+  "width": 80
+ },
+ "IMG_004.png": {
+  "height": 76,
+  "width": 80
+ },
+ "IMG_005.png": {
+  "height": 80,
+  "width": 80
+ },
+ "alpha.png": {
+  "height": 40,
+  "width": 50
+ },
+ "outdoor/gray.bmp": {
+  "height": 40,
+  "width": 50
+ },
+ "outdoor/ảnh cưới 01.tif": {
+  "height": 40,
+  "width": 50
+ },
+ "rotated.jpg": {
+  "height": 90,
+  "width": 60
+ }
+}

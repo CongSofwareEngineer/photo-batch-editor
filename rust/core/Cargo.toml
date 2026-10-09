@@ -1,0 +1,32 @@
+[package]
+name = "pbe-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Photo Batch Editor — core logic (Rust port of the Python core/ package)"
+
+[lib]
+name = "pbe_core"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+sha2 = "0.10"
+hmac = "0.12"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+hex = "0.4"
+getrandom = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp"] }
+jpeg-encoder = "0.6"
+kamadak-exif = "0.6"
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["ndarray", "download-binaries"], optional = true }
+ndarray = { version = "0.16", optional = true }
+
+[features]
+# Super Resolution (Real-ESRGAN qua ONNX Runtime). Tắt mặc định để `core` không kéo ONNX runtime.
+sr = ["dep:ort", "dep:ndarray"]
+
+[dev-dependencies]
+tempfile = "3"
