@@ -1,6 +1,0 @@
--r requirements-cuda.txt
-pytest>=8.0
-pyinstaller>=6.0
-# "eslint" for Python (lint.bat / lint.sh, VS Code): Ruff = format + lint, Pyright = type check
-ruff>=0.6
-pyright>=1.1.400
