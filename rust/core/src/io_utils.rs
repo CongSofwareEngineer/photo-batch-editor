@@ -82,7 +82,7 @@ fn orientation_map(
     }
 }
 
-fn apply_orientation_vec<T: Copy + Default>(
+pub(crate) fn apply_orientation_vec<T: Copy + Default>(
     data: &[T],
     h: usize,
     w: usize,
@@ -198,7 +198,7 @@ fn to_rgb(img: DynamicImage) -> Pixels {
     }
 }
 
-fn read_orientation(bytes: &[u8]) -> u16 {
+pub(crate) fn read_orientation(bytes: &[u8]) -> u16 {
     let exif_reader = exif::Reader::new();
     if let Ok(exif) = exif_reader.read_from_container(&mut Cursor::new(bytes)) {
         if let Some(field) = exif.get_field(exif::Tag::Orientation, exif::In::PRIMARY) {

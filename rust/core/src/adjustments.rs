@@ -553,7 +553,19 @@ fn apply_groups(mut p: Planar, s: &AdjustmentSettings, ls: usize) -> Planar {
 }
 
 pub fn apply_adjustments_planar_u8(img: &ImageU8, s: &AdjustmentSettings) -> Planar {
-    let ls = long_side_of(img.h, img.w);
+    apply_adjustments_planar_u8_ls(img, s, None)
+}
+
+/// Như [`apply_adjustments_planar_u8`] nhưng `long_side` ghi đè kích thước dùng cho các tham số
+/// theo không gian (bán kính sharpening, clarity…). Dùng khi `img` là bản xem trước thu nhỏ của
+/// một ảnh lớn, để hiệu ứng trông giống nhau ở mọi cỡ xem trước (giống tham số `long_side` của
+/// `core.pipeline.apply_adjustments`).
+pub fn apply_adjustments_planar_u8_ls(
+    img: &ImageU8,
+    s: &AdjustmentSettings,
+    long_side: Option<usize>,
+) -> Planar {
+    let ls = long_side.unwrap_or_else(|| long_side_of(img.h, img.w));
     apply_groups(to_planar_u8(img, s), s, ls)
 }
 

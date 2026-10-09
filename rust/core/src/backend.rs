@@ -131,6 +131,19 @@ pub fn gaussian_blur(src: &Plane, sigma: f64) -> Plane {
     upscale(&small, src.h, src.w, f)
 }
 
+/// Blur Gaussian viền phản chiếu **luôn ở độ phân giải gốc** (không thu nhỏ khi sigma lớn)
+/// — khớp đúng `cv2.GaussianBlur(..., borderType=BORDER_REFLECT)`.
+///
+/// `gaussian_blur` chạy sigma lớn trên bản thu nhỏ để nhanh (chỉ dùng cho mặt nạ tông màu,
+/// sai số không nhìn thấy). Blur của photo editor (`core/photo/effects.py`) là hiệu ứng **nhìn thấy**
+/// nên phải dùng bản này.
+pub fn gaussian_blur_exact(src: &Plane, sigma: f64) -> Plane {
+    if sigma <= 0.0 {
+        return src.clone();
+    }
+    gaussian_native(src, sigma)
+}
+
 /// `fn(gaussian_blur(src, sigma))` cho `fn` theo từng điểm. Sigma lớn thì fn chạy trên bản thu nhỏ.
 pub fn blur_map<F>(src: &Plane, sigma: f64, f: F) -> Plane
 where
