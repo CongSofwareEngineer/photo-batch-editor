@@ -18,11 +18,17 @@ sub-folders. Originals are never modified.
   Editor's current adjustments, from a built-in template, or imported from a `.json` file), edit
   them with a live preview on a sample photo, rename, duplicate, export, delete. Every change is
   saved automatically; pick a setting in the Editor's “Setting” box to apply it.
-* **Photo editor** (sidebar) — one photo, Photoshop-style, with layers: inserted images (PNG
-  transparency, move / resize / rotate), blur or pixelate areas, crop (free, original, 1:1, 4:3,
-  16:9, 9:16), rotate 90° / straighten / flip, brightness / contrast / saturation / temperature /
-  sharpness (same algorithms as the batch). Ctrl + wheel zooms at the cursor, Space + drag pans,
-  Ctrl+0 fit, Ctrl+Z / Ctrl+Y (undo/redo). Export JPEG (quality) or PNG.
+* **Photo editor** (sidebar) — one photo, Photoshop-style layout: menu bar (File / Edit / Image /
+  View) + tool options bar on top, vertical toolbar on the left (Move V, Crop C, Blur B, Insert
+  image I, Collage L, Hand H, Zoom Z), panels on the right, status bar at the bottom. Layers:
+  inserted images (PNG transparency, move, resize with corner handles — Shift keeps the ratio) and
+  blur / pixelate areas; crop (free, 1:1, 4:3, 16:9, 9:16, rule-of-thirds grid), rotate 90° /
+  straighten / flip, brightness / contrast / saturation / temperature / sharpness / clarity (same
+  algorithms as the batch), **Unsharp Mask** sharpening (Amount / Radius / Threshold, Light /
+  Medium / Strong presets). **Collage** window: 8 layouts, size, spacing, corner radius,
+  background colour, drag / scroll to frame each photo, then open the result in the editor.
+  Wheel zooms at the cursor, Space + drag pans, Ctrl+0 fit, Ctrl+1 100 %, Ctrl+Z / Ctrl+Shift+Z,
+  Ctrl+J duplicate layer, Ctrl+E export. Export JPEG (quality) or PNG.
 * **Video editor** (sidebar) — preview, timeline, split / reorder / delete clips, In / Out marks,
   mute, music (start offset, own volume, fade out). Export MP4 or MOV, original / 1080p / 720p, in
   the background with a progress bar and Cancel, to `<video folder>\editor` (the original is never
@@ -100,8 +106,7 @@ Real-ESRGAN code and weights are BSD-3-Clause, see `models/LICENSE-Real-ESRGAN.t
 
 ## Not yet ported
 
-The Rust GUI does not yet have: text layers in the photo editor, drawing text onto video, the
-collage dialog (the layout logic exists in `pbe-core`), `.pbep` project files, video playback with
+The Rust GUI does not yet have: text layers in the photo editor, drawing text onto video, `.pbep` project files, video playback with
 sound (preview is a still frame extracted with FFmpeg), the full-screen image viewer, tray
 notifications and list thumbnails. See `docs/instruction/rust-port.md` for the full status table.
 

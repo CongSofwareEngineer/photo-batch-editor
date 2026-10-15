@@ -10,7 +10,7 @@
 
 - **Trạng thái chuyển đổi:** bản Python (`core/`, `ui/`, `tests/`, `main.py`, `dev.py`, các script build)
   **đã được xoá hẳn** — Rust là codebase **duy nhất**; `cargo` trong `rust/` là nguồn chuẩn (test, build).
-  Các phần GUI chưa port (layer chữ, vẽ chữ lên video, hộp thoại collage, `.pbep`, phát video có tiếng,
+  Các phần GUI chưa port (layer chữ, vẽ chữ lên video, `.pbep`, phát video có tiếng,
   xem ảnh toàn màn hình, khay thông báo, thumbnail) hiện **thiếu** — xem bảng GĐ5 bên dưới.
 - **Vì sao theo giai đoạn:** app Python cũ là desktop PyQt6 ~20.500 dòng; GUI phải viết lại hoàn toàn (Qt không map
   1-1 sang Rust). Rủi ro lớn nhất nằm ở GUI và các phần phụ thuộc thư viện C (OpenCV, ONNX Runtime, PIL,
@@ -97,11 +97,11 @@
 | Chỉnh nhiều ảnh (3 màn hình) | `ui/prepare_view.py`, `run_view.py`, `results_view.py`, `file_list.py` | `batch.rs` | ✅ |
 | Bảng 15 chỉnh sửa + SR + Image Size | `ui/adjustment_panel.py` | `adjust.rs` | ✅ |
 | Xem trước trước/sau (luồng nền) | `ui/preview.py`, `ui/workers.py` | `preview.rs` | ✅ |
-| Sửa ảnh đơn: canvas, zoom/pan, crop, xoay/lật, layer ảnh, layer blur, undo/redo, xuất | `ui/photo/*` | `photo/{mod,doc,render}.rs` | ✅ |
+| Sửa ảnh đơn: bố cục Photoshop (menu, options bar, toolbox dọc, status bar), canvas, zoom/pan, Hand/Zoom, crop, xoay/lật, layer ảnh (đổi cỡ bằng nút góc), layer blur, Unsharp Mask, undo/redo, xuất | `ui/photo/*` | `photo/{mod,doc,render}.rs` | ✅ |
 | Sửa video: timeline, cắt/xoá/đổi chỗ/trim, In/Out, tắt tiếng, nhạc, xuất kèm tiến độ/huỷ | `ui/video/*` | `video.rs` | ✅ |
 | Settings: preset, tài khoản, ngôn ngữ | `ui/settings_view.py` | `settings_view.rs` | ✅ |
 | **Layer chữ** (photo editor) + **vẽ chữ lên video** | `ui/photo/render.py`, `ui/video/text_render.py` | — | ⬜ còn thiếu |
-| **Hộp thoại collage** (logic `collage.rs` đã có) | `ui/photo/collage_dialog.py` | — | ⬜ còn thiếu |
+| Cửa sổ collage | `ui/photo/collage_dialog.py` | `photo/collage.rs` | ✅ |
 | **File dự án `.pbep`** | `ui/photo/project_io.py` | — | ⬜ còn thiếu |
 | Phát video có tiếng trong app | `ui/video/player.py` | — | ⬜ còn thiếu (xem trước là khung tĩnh lấy bằng FFmpeg) |
 | Trình xem ảnh toàn màn hình, thông báo khay, thumbnail danh sách | `ui/image_viewer.py`, `notifier.py`, `icons.py` | — | ⬜ còn thiếu |

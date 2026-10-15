@@ -187,3 +187,33 @@ fn rotate_cover_fills_the_frame() {
         assert_eq!(out.px(y, x)[3], 255, "góc ({y},{x}) bị hở");
     }
 }
+
+#[test]
+fn render_applies_unsharp_mask_at_every_scale() {
+    use pbe_core::photo::effects::SharpenSettings;
+    let mut doc = Document::new(checker(80, 120), None);
+    let plain = render::render(&doc.state, 1.0);
+    doc.state.background.sharpen = SharpenSettings {
+        amount: 200.0,
+        radius: 2.0,
+        threshold: 0.0,
+    };
+    let sharp = render::render(&doc.state, 1.0);
+    assert!(rgb_std(&sharp) > rgb_std(&plain));
+    // xem trước nửa tỉ lệ vẫn làm nét (bán kính thu theo tỉ lệ)
+    let half_plain = render::render(&Document::new(checker(80, 120), None).state, 0.5);
+    assert!(rgb_std(&render::render(&doc.state, 0.5)) > rgb_std(&half_plain));
+}
+
+#[test]
+fn layer_set_bounds_resizes_image_and_blur_layers() {
+    let mut doc = Document::new(checker(100, 100), None);
+    doc.add_image_layer(RgbaImage::filled(10, 20, [255, 0, 0, 255]), "logo");
+    let l = doc.selected_layer_mut().unwrap();
+    l.set_bounds(10.0, 20.0, 40.0, 30.0);
+    assert_eq!(l.bounds(), (10.0, 20.0, 40.0, 30.0));
+    doc.add_blur_layer((0.0, 0.0, 10.0, 10.0), "blur", 40.0);
+    let b = doc.selected_layer_mut().unwrap();
+    b.set_bounds(5.0, 6.0, 0.0, 7.0); // cỡ tối thiểu 1 px
+    assert_eq!(b.bounds(), (5.0, 6.0, 1.0, 7.0));
+}

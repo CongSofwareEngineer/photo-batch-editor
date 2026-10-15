@@ -3,7 +3,7 @@
 //! Một hàm duy nhất [`render`] dùng cho cả xem trước (scale < 1, nhanh) và xuất file
 //! (scale = 1), nên những gì thấy trên canvas đúng bằng những gì được ghi ra.
 
-use pbe_core::photo::effects::{apply_blur_effect, apply_photo_adjust};
+use pbe_core::photo::effects::{apply_blur_effect, apply_photo_adjust, unsharp_mask};
 use pbe_core::photo::geometry::cover_scale;
 use pbe_core::photo::RgbaImage;
 
@@ -31,6 +31,9 @@ pub fn render(state: &DocState, scale: f64) -> RgbaImage {
     } else {
         if !bg.adjust.is_default() {
             canvas = apply_photo_adjust(&canvas, &bg.adjust, Some(full_long));
+        }
+        if !bg.sharpen.is_default() {
+            canvas = unsharp_mask(&canvas, &bg.sharpen, s);
         }
         if bg.angle.abs() > 1e-6 {
             canvas = rotate_cover(&canvas, bg.angle);

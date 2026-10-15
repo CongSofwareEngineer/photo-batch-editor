@@ -8,14 +8,51 @@
     zoom tại con trỏ, khung crop theo tỉ lệ, xoay 90° / lật toạ độ, cover_scale cho xoay tự do),
     `effects.rs` (blur / pixelate, `PhotoAdjust` → `AdjustmentSettings`),
     `image_io.rs` (đọc RGBA giữ trong suốt, ghi JPEG/PNG, thư mục `editor`), `collage.rs` (xem collage.md)
-  - `rust/gui/src/photo/`: `mod.rs` / `doc.rs` (Document + ImageLayer / BlurLayer + Background),
-    `render.rs` (ghép framebuffer CPU → texture wgpu, cache nền đã chỉnh + cache vùng mờ),
-    `mod.rs` (zoom / pan, công cụ Select, Move, Crop, Blur), panel layer + thuộc tính, export
+  - `rust/gui/src/photo/`: `doc.rs` (Document + ImageLayer / BlurLayer + Background, `Layer::set_bounds`,
+    `Document::new_untitled`), `render.rs` (ghép CPU: nền → Adjust → Unsharp Mask → xoay tự do → layer),
+    `mod.rs` (bố cục Photoshop: menu, options bar, toolbox dọc, status bar; zoom / pan; công cụ Move,
+    Crop, Blur, Hand, Zoom; nút góc đổi cỡ; panel Thuộc tính / Adjust / Độ nét / Layer / Xuất),
+    `collage.rs` (cửa sổ cắt ghép — xem collage.md)
   - Dùng chung: `rust/gui/src/app.rs`, `sidebar.rs` (trang photo), `theme.rs`, `rust/core/src/i18n*`
 - **Changelog:** [../changelog/photo-editor.md](../changelog/photo-editor.md)
 - **Ghi chú:** mã Python (`core/photo/`, `ui/photo/`) đã xoá; logic → `rust/core/src/photo/`; GUI → `rust/gui/src/photo/` (egui + framebuffer wgpu). **Chưa** port: layer chữ, file dự án `.pbep`. Chi tiết: [rust-port.md](rust-port.md).
 
 ## Logic chính
+
+> Mục **"Bản Rust hiện tại"** ngay dưới đây là hiện trạng code. Các mục sau đó mô tả bản Python cũ (đã xoá),
+> giữ làm chuẩn hành vi cho phần chưa port (chữ, `.pbep`).
+
+### Bản Rust hiện tại (`rust/gui/src/photo/mod.rs`)
+
+- **Bố cục kiểu Photoshop** (thứ tự panel egui: menu → options → status → toolbox → panel phải → canvas):
+  - **Thanh menu** (trên cùng): File (Mở ảnh Ctrl+O, Ảnh ghép mới…, Chèn ảnh, Xuất Ctrl+E, Đóng ảnh),
+    Edit (Hoàn tác Ctrl+Z, Làm lại Ctrl+Shift+Z, Nhân đôi layer Ctrl+J, Xoá layer Del), Image (xoay trái /
+    phải 90°, lật ngang / dọc, Cắt, Đặt lại chỉnh sửa), View (phóng to / thu nhỏ, Vừa màn hình Ctrl+0,
+    100 % Ctrl+1); tên ảnh (• = chưa lưu); bên phải: ↶ ↷ + nút Xuất.
+  - **Thanh tuỳ chọn** (dưới menu, như options bar): icon công cụ đang chọn + tuỳ chọn riêng: Move (Chèn
+    ảnh, cỡ layer đang chọn, gợi ý), Crop (tỉ lệ Tự do / 1:1 / 4:3 / 16:9 / 9:16, Áp dụng / Huỷ, cỡ vùng cắt),
+    Blur (Làm mờ / Ô vuông, Chữ nhật / Elip, Độ mạnh), Hand / Zoom (+ / −, 100 %, Vừa màn hình).
+  - **Thanh công cụ dọc** (trái, 48 px, hằng `TOOLBAR`): Move V, Crop C | Blur B, Chèn ảnh I, Collage L |
+    Hand H, Zoom Z. Icon vẽ bằng vector (`paint_icon`) nên không phụ thuộc font; tooltip "Tên (phím)".
+    Chèn ảnh / Collage là nút hành động (không phải công cụ). Chưa mở ảnh thì chỉ Collage bấm được.
+  - **Panel phải**: Thuộc tính (opacity, độ mạnh / kiểu blur của layer chọn), Adjust (6 thanh: sáng, tương
+    phản, bão hoà, nhiệt độ, Sharpness, Clarity + Làm thẳng −45…45°), Tăng độ nét (Unsharp Mask — xem
+    [sharpen.md](sharpen.md)), Layer (trên → dưới, 👁 ẩn/hiện, ▲ ▼, nhân đôi, xoá; dòng "Nền" cuối cùng chỉ
+    ẩn/hiện), Xuất (JPEG chất lượng / PNG).
+  - **Thanh trạng thái** (dưới): % zoom, cỡ ảnh, toạ độ X/Y px ảnh dưới con trỏ, số layer.
+- **Công cụ trên canvas:** Move: bấm = chọn layer trên cùng tại điểm (chỗ trống = bỏ chọn), kéo layer = di
+  chuyển, kéo 4 nút góc trắng = đổi cỡ (góc đối diện đứng yên, Shift giữ tỉ lệ; `resize_from_corner`), kéo chỗ
+  trống = cuộn, mũi tên nhích 1 px / Shift 10 px. Crop: kéo khung (tối phần ngoài + lưới 1/3), Enter áp dụng,
+  Esc huỷ. Blur: kéo khung ≥ 4 px → tạo layer Blur. Hand: kéo = cuộn. Zoom: bấm = phóng to tại điểm bấm, Alt +
+  bấm = thu nhỏ. Mọi công cụ: Space + kéo hoặc chuột giữa = cuộn; lăn chuột = zoom tại con trỏ.
+  Con trỏ chuột đổi theo công cụ (Grab, ZoomIn/Out, Crosshair, Resize ở nút góc).
+- **Phím tắt:** chữ cái chọn công cụ chỉ khi không gõ trong ô nhập (`egui_wants_keyboard_input`) và không giữ
+  Ctrl/Cmd; khi cửa sổ Collage mở thì editor bỏ qua mọi phím. Kéo / đổi cỡ / nhích / slider dùng merge key nên
+  mỗi thao tác = 1 bước undo.
+- **Ảnh ghép**: kết quả cửa sổ Collage mở thành tài liệu mới tên "collage" (`Document::new_untitled`,
+  đánh dấu chưa lưu); xuất mặc định `collage.jpg` trong thư mục ảnh gần nhất.
+
+### Bản Python cũ (chuẩn hành vi)
 
 - **Bố cục:** trên = Mở / Lưu dự án / Xuất / Hoàn tác / Làm lại + menu "Thêm" (mở dự án, lưu thành,
   tạo ảnh ghép, đóng ảnh); trái = thanh công cụ dọc; giữa = canvas; phải = thuộc tính (đổi theo công cụ /
@@ -68,8 +105,10 @@
 - Lật khung: chữ vẫn đọc được (chỉ đổi vị trí và góc), ảnh chèn bị lật thật.
 - Ảnh 16-bit được đọc qua bộ đọc của batch rồi chuyển 8-bit (editor làm việc 8-bit RGBA).
 - Bộ nhớ: mỗi bước undo chỉ giữ tham chiếu QImage; crop/xoay nhiều lần trên ảnh rất lớn sẽ giữ nhiều bản ảnh.
-- Phím chữ cái (V, M, C…) chỉ là phím tắt khi không gõ trong ô nhập; Ctrl+1 của trang Hàng loạt tạm tắt khi
-  đang ở trang này (nhường cho zoom 100 %).
+- Phím chữ cái (V, C, B, I, L, H, Z) chỉ là phím tắt khi không gõ trong ô nhập; Ctrl+1 của trang Hàng loạt tạm
+  tắt khi đang ở trang này (nhường cho zoom 100 %).
+- Bản Rust: nút góc đổi cỡ dùng hình bao **chưa xoay** của layer; chưa có nút xoay layer bằng chuột (bản Python có).
+- Bản Rust: Space + kéo cần focus ở canvas; nếu một nút đang được focus thì Space có thể bấm nút đó.
 
 ## Test
 
@@ -77,7 +116,10 @@
   lệ, xoay/lật toạ độ, cover_scale, pixelate / blur, chỉnh ảnh = đúng pipeline batch, đọc RGBA, ghi
   JPEG/PNG, đường dẫn `editor` — bản port của `tests/test_photo_core.py` cũ.
 - `rust/gui/tests/cpu_render.rs` (`cargo test -p pbe-gui`): framebuffer trộn alpha, ghép tài liệu, crop +
-  xoay 90° + lật, undo/redo — bản port phần CPU của `tests/test_photo_editor.py` cũ.
-- Thủ công: `cargo run -p pbe-gui` → trang Sửa ảnh đơn: mở ảnh lớn (> 20 MP), Ctrl+lăn zoom, Space+kéo,
+  xoay 90° + lật, undo/redo, `layer_set_bounds_resizes_image_and_blur_layers`, Unsharp Mask ở mọi tỉ lệ.
+- `rust/gui/src/photo/mod.rs` (`#[cfg(test)]`): `resize_from_corner` giữ góc đối diện, Shift giữ tỉ lệ.
+- Thủ công: `cargo run -p pbe-gui` → trang Sửa ảnh đơn: thử từng nút thanh công cụ dọc + phím V C B I L H Z,
+  menu File / Edit / Image / View, kéo nút góc layer (có / không Shift), công cụ Zoom (bấm, Alt + bấm);
+  mở ảnh lớn (> 20 MP), lăn zoom, Space+kéo,
   chèn PNG trong suốt, che mặt bằng pixelate, cắt 16:9, Ctrl+Z nhiều lần, xuất JPEG/PNG.
   (Layer chữ và `.pbep` chưa port.)

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use pbe_core::photo::effects::PhotoAdjust;
+use pbe_core::photo::effects::{PhotoAdjust, SharpenSettings};
 use pbe_core::photo::geometry::{flip_point, normalize_angle, rotate90_point};
 use pbe_core::photo::history::History;
 use pbe_core::photo::RgbaImage;
@@ -118,6 +118,20 @@ impl Layer {
         }
     }
 
+    /// Đặt lại hình chữ nhật bao (px ảnh) — dùng khi kéo nút góc để đổi cỡ.
+    pub fn set_bounds(&mut self, x: f64, y: f64, w: f64, h: f64) {
+        let (w, h) = (w.max(1.0), h.max(1.0));
+        match self {
+            Layer::Image(l) => {
+                l.x = x + w / 2.0;
+                l.y = y + h / 2.0;
+                l.width = w;
+                l.height = h;
+            }
+            Layer::Blur(l) => l.rect = (x, y, w, h),
+        }
+    }
+
     pub fn translate(&mut self, dx: f64, dy: f64) {
         match self {
             Layer::Image(l) => {
@@ -177,6 +191,7 @@ impl Layer {
 pub struct Background {
     pub img: RgbaImage,
     pub adjust: PhotoAdjust,
+    pub sharpen: SharpenSettings, // Unsharp Mask (xem docs/instruction/sharpen.md)
     pub angle: f64, // xoay tự do (làm thẳng), độ; ảnh được phóng để phủ kín
     pub visible: bool,
 }
@@ -211,6 +226,7 @@ impl Document {
                 background: Background {
                     img,
                     adjust: PhotoAdjust::default(),
+                    sharpen: SharpenSettings::default(),
                     angle: 0.0,
                     visible: true,
                 },
@@ -223,6 +239,14 @@ impl Document {
             modified: false,
             revision: 1,
         }
+    }
+
+    /// Tài liệu mới chưa có file nguồn (vd. ảnh ghép): đặt tên và đánh dấu chưa lưu.
+    pub fn new_untitled(img: RgbaImage, name: &str) -> Self {
+        let mut doc = Document::new(img, None);
+        doc.name = name.to_string();
+        doc.modified = true;
+        doc
     }
 
     pub fn size(&self) -> (usize, usize) {

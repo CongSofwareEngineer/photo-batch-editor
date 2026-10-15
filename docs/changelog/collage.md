@@ -7,3 +7,4 @@
 - 2026-10-06: Tách file log cũ `docs/collage.md` thành `instruction/` (hiện trạng) + `changelog/` (lịch sử) — theo rule mới trong CLAUDE.md.
 - 2026-10-09 | Thêm mới | Bản Rust của logic này: xem [rust-port.md](../instruction/rust-port.md) (GĐ4 cho `core/`, GĐ5 cho GUI egui+wgpu) — bản Python giữ nguyên, không đổi hành vi.
 - 2026-10-09 | Sửa | Cắt ghép layout (Collage): cập nhật `File:` sang Rust (`rust/core/src/photo/collage.rs`); hộp thoại collage vẫn **chưa** port — vì mã Python đã bị xoá.
+- 2026-10-15 | Thêm mới | Cửa sổ Cắt ghép layout (Rust): port hộp thoại collage sang egui (`rust/gui/src/photo/collage.rs`), thêm `render_collage` / `cell_at` vào core và 4 mẫu mới (3 ngang, 3 dọc, 1 trên + 2 dưới, lưới 3 × 3) — hộp thoại là phần còn thiếu của bản Rust và người dùng cần cắt ghép layout.

@@ -150,16 +150,17 @@ const fn s(key: &'static str, label: &'static str, minimum: f64, maximum: f64) -
     }
 }
 
-/// 5 thanh trượt của bảng Adjust trong photo editor (tập con của 15 chỉnh sửa Camera Raw).
-pub const ADJUST_SLIDERS: [SliderSpec; 5] = [
+/// 6 thanh trượt của bảng Adjust trong photo editor (tập con của 15 chỉnh sửa Camera Raw).
+pub const ADJUST_SLIDERS: [SliderSpec; 6] = [
     s("brightness", "Brightness", -100.0, 100.0),
     s("contrast", "Contrast", -100.0, 100.0),
     s("saturation", "Saturation", -100.0, 100.0),
     s("temperature", "Temperature", -100.0, 100.0),
     s("sharpness", "Sharpness", 0.0, 150.0),
+    s("clarity", "Clarity", -100.0, 100.0),
 ];
 
-/// Giá trị 5 thanh trượt Adjust của một layer.
+/// Giá trị các thanh trượt Adjust của một layer.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PhotoAdjust {
     pub brightness: f64,
@@ -167,6 +168,7 @@ pub struct PhotoAdjust {
     pub saturation: f64,
     pub temperature: f64,
     pub sharpness: f64,
+    pub clarity: f64,
 }
 
 impl PhotoAdjust {
@@ -181,6 +183,7 @@ impl PhotoAdjust {
             "saturation" => self.saturation,
             "temperature" => self.temperature,
             "sharpness" => self.sharpness,
+            "clarity" => self.clarity,
             _ => return None,
         })
     }
@@ -197,6 +200,7 @@ impl PhotoAdjust {
             "saturation" => self.saturation = v,
             "temperature" => self.temperature = v,
             "sharpness" => self.sharpness = v,
+            "clarity" => self.clarity = v,
             _ => return false,
         }
         true
@@ -210,6 +214,7 @@ impl PhotoAdjust {
             saturation: self.saturation,
             temperature: self.temperature,
             sharpening_amount: self.sharpness,
+            clarity: self.clarity,
             ..Default::default()
         }
     }
@@ -221,6 +226,7 @@ impl PhotoAdjust {
             "saturation": self.saturation,
             "temperature": self.temperature,
             "sharpness": self.sharpness,
+            "clarity": self.clarity,
         })
     }
 
@@ -236,6 +242,134 @@ impl PhotoAdjust {
         }
         out
     }
+}
+
+// --- Unsharp Mask (Filter › Sharpen › Unsharp Mask của Photoshop) -------------------------
+
+const fn us(key: &'static str, label: &'static str, minimum: f64, maximum: f64, step: f64, default: f64, decimals: usize) -> SliderSpec {
+    SliderSpec {
+        key,
+        label,
+        panel: "Sharpen",
+        group: "Sharpen",
+        minimum,
+        maximum,
+        step,
+        default,
+        decimals,
+    }
+}
+
+/// 3 thanh trượt Unsharp Mask: Amount (%), Radius (px ảnh gốc), Threshold (mức 0–255).
+pub const SHARPEN_SLIDERS: [SliderSpec; 3] = [
+    us("amount", "Amount", 0.0, 500.0, 1.0, 0.0, 0),
+    us("radius", "Radius", 0.1, 10.0, 0.1, 1.0, 1),
+    us("threshold", "Threshold", 0.0, 255.0, 1.0, 0.0, 0),
+];
+
+/// Thông số Unsharp Mask; `amount == 0` = tắt.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SharpenSettings {
+    pub amount: f64,
+    pub radius: f64,
+    pub threshold: f64,
+}
+
+impl Default for SharpenSettings {
+    fn default() -> Self {
+        SharpenSettings {
+            amount: 0.0,
+            radius: 1.0,
+            threshold: 0.0,
+        }
+    }
+}
+
+impl SharpenSettings {
+    pub fn is_default(&self) -> bool {
+        self.amount <= 0.0
+    }
+
+    pub fn get(&self, key: &str) -> Option<f64> {
+        Some(match key {
+            "amount" => self.amount,
+            "radius" => self.radius,
+            "threshold" => self.threshold,
+            _ => return None,
+        })
+    }
+
+    /// Đặt theo khoá, kẹp vào khoảng của [`SHARPEN_SLIDERS`].
+    pub fn set(&mut self, key: &str, value: f64) -> bool {
+        let Some(spec) = SHARPEN_SLIDERS.iter().find(|s| s.key == key) else {
+            return false;
+        };
+        let v = value.clamp(spec.minimum, spec.maximum);
+        match key {
+            "amount" => self.amount = v,
+            "radius" => self.radius = v,
+            "threshold" => self.threshold = v,
+            _ => return false,
+        }
+        true
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "amount": self.amount,
+            "radius": self.radius,
+            "threshold": self.threshold,
+        })
+    }
+
+    /// Khoá thiếu → mặc định, ngoài khoảng → kẹp.
+    pub fn from_json(data: &serde_json::Value) -> SharpenSettings {
+        let mut out = SharpenSettings::default();
+        let Some(map) = data.as_object() else {
+            return out;
+        };
+        for spec in SHARPEN_SLIDERS {
+            if let Some(v) = map.get(spec.key).and_then(|v| v.as_f64()) {
+                out.set(spec.key, v);
+            }
+        }
+        out
+    }
+}
+
+/// Unsharp Mask trên **độ sáng**: `out = src + amount × (L − blur(L, radius))` cộng đều cho R, G, B
+/// (không tạo viền màu như khi làm nét từng kênh). Bỏ qua pixel có `|L − blur| < threshold`
+/// để vùng mịn (da, bầu trời) không bị nổi hạt. Alpha giữ nguyên.
+///
+/// `scale` = tỉ lệ của `img` so với ảnh gốc (bản xem trước thu nhỏ → bán kính thu theo) để
+/// xem trước và xuất file trông như nhau.
+pub fn unsharp_mask(img: &RgbaImage, s: &SharpenSettings, scale: f64) -> RgbaImage {
+    if s.is_default() || img.is_empty() {
+        return img.clone();
+    }
+    let n = img.h * img.w;
+    let mut lum = Plane::new(img.h, img.w);
+    for i in 0..n {
+        let p = &img.data[i * 4..i * 4 + 3];
+        lum.data[i] = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
+    }
+    let sigma = (s.radius * scale).max(0.3);
+    let blur = backend::gaussian_blur_exact(&lum, sigma);
+    let amount = (s.amount / 100.0) as f32;
+    let threshold = s.threshold as f32;
+    let mut out = img.clone();
+    for i in 0..n {
+        let d = lum.data[i] - blur.data[i];
+        if d.abs() < threshold {
+            continue;
+        }
+        let add = d * amount;
+        for c in 0..3 {
+            let v = img.data[i * 4 + c] as f32 + add;
+            out.data[i * 4 + c] = v.round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
 }
 
 /// RGBA uint8 → RGBA uint8 đã chỉnh (alpha giữ nguyên).
@@ -358,6 +492,7 @@ mod tests {
             saturation: -30.0,
             temperature: 25.0,
             sharpness: 40.0,
+            clarity: 10.0,
         };
         let out = apply_photo_adjust(&rgba, &adjust, None);
 
@@ -387,6 +522,48 @@ mod tests {
         assert_eq!(a.sharpness, 0.0);
         assert_eq!(a.contrast, 0.0);
         assert_eq!(PhotoAdjust::from_json(&serde_json::Value::Null), PhotoAdjust::default());
+    }
+
+    #[test]
+    fn unsharp_mask_increases_edge_contrast() {
+        // Cạnh đen | trắng: sau khi làm nét, phía tối tối hơn, phía sáng sáng hơn.
+        let mut img = RgbaImage::filled(20, 20, [60, 60, 60, 255]);
+        for y in 0..20 {
+            for x in 10..20 {
+                img.set_px(y, x, [190, 190, 190, 255]);
+            }
+        }
+        let s = SharpenSettings { amount: 150.0, radius: 1.5, threshold: 0.0 };
+        let out = unsharp_mask(&img, &s, 1.0);
+        assert!(out.px(10, 9)[0] < 60, "phía tối phải tối hơn: {:?}", out.px(10, 9));
+        assert!(out.px(10, 10)[0] > 190, "phía sáng phải sáng hơn: {:?}", out.px(10, 10));
+        // Xa cạnh (vùng phẳng) không đổi, alpha giữ nguyên.
+        assert_eq!(out.px(10, 0), img.px(10, 0));
+        assert_eq!(out.px(10, 9)[3], 255);
+    }
+
+    #[test]
+    fn unsharp_mask_threshold_and_default() {
+        let img = noise(30, 30, 3);
+        // amount = 0 → giữ nguyên ảnh.
+        assert_eq!(unsharp_mask(&img, &SharpenSettings::default(), 1.0), img);
+        // Threshold tối đa → không pixel nào vượt ngưỡng → giữ nguyên.
+        let s = SharpenSettings { amount: 200.0, radius: 2.0, threshold: 255.0 };
+        assert_eq!(unsharp_mask(&img, &s, 1.0), img);
+        // Có làm nét thì độ lệch chuẩn (độ "gắt") tăng.
+        let s = SharpenSettings { amount: 200.0, radius: 2.0, threshold: 0.0 };
+        assert!(rgb_std(&unsharp_mask(&img, &s, 1.0)) > rgb_std(&img));
+    }
+
+    #[test]
+    fn sharpen_settings_json_clamps() {
+        let s = SharpenSettings::from_json(&serde_json::json!({
+            "amount": 900, "radius": 0, "threshold": "x"
+        }));
+        assert_eq!(s.amount, 500.0);
+        assert_eq!(s.radius, 0.1);
+        assert_eq!(s.threshold, 0.0);
+        assert_eq!(SharpenSettings::from_json(&s.to_json()), s);
     }
 
     #[test]

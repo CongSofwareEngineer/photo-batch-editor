@@ -18,6 +18,7 @@
 | Format / lint / type check code (Ruff + Pyright, "ESLint cho Python") | [instruction/code-format.md](instruction/code-format.md) | [changelog/code-format.md](changelog/code-format.md) |
 | Sửa ảnh đơn (canvas, layer, công cụ, xuất, file dự án) | [instruction/photo-editor.md](instruction/photo-editor.md) | [changelog/photo-editor.md](changelog/photo-editor.md) |
 | Cắt ghép layout (collage) | [instruction/collage.md](instruction/collage.md) | [changelog/collage.md](changelog/collage.md) |
+| Tăng độ nét (Unsharp Mask, Clarity) trong Sửa ảnh đơn | [instruction/sharpen.md](instruction/sharpen.md) | [changelog/sharpen.md](changelog/sharpen.md) |
 | Sửa video (FFmpeg: cắt, tắt tiếng, chữ, nhạc, xuất) | [instruction/video-editor.md](instruction/video-editor.md) | [changelog/video-editor.md](changelog/video-editor.md) |
 | Port sang Rust (chuyển toàn bộ app sang Rust, theo giai đoạn) | [instruction/rust-port.md](instruction/rust-port.md) | [changelog/rust-port.md](changelog/rust-port.md) |
 
