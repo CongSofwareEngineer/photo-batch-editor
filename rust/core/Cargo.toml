@@ -27,6 +27,8 @@ ndarray = { version = "0.16", optional = true }
 [features]
 # Super Resolution (Real-ESRGAN qua ONNX Runtime). Tắt mặc định để `core` không kéo ONNX runtime.
 sr = ["dep:ort", "dep:ndarray"]
+# Tách nền (MODNet qua ONNX Runtime) — GUI bật feature này.
+bgremove = ["dep:ort", "dep:ndarray"]
 
 [dev-dependencies]
 tempfile = "3"

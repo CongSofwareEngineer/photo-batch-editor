@@ -6,6 +6,7 @@ pub mod effects;
 pub mod geometry;
 pub mod history;
 pub mod image_io;
+pub mod matting;
 
 /// Ảnh HWC 4 kênh uint8 (RGBA, chưa premultiply) — đơn vị làm việc của photo editor.
 ///

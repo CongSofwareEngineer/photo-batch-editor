@@ -1,17 +1,20 @@
 //! Ghép tài liệu photo editor thành pixel, **bằng CPU**. Port của `ui/photo/render.py`.
+//! Thứ tự nền: Adjust → Unsharp Mask → tách nền (matte) → xoay tự do → nền thay thế → layer.
 //!
 //! Một hàm duy nhất [`render`] dùng cho cả xem trước (scale < 1, nhanh) và xuất file
 //! (scale = 1), nên những gì thấy trên canvas đúng bằng những gì được ghi ra.
 
 use pbe_core::photo::effects::{apply_blur_effect, apply_photo_adjust, unsharp_mask};
 use pbe_core::photo::geometry::cover_scale;
+use pbe_core::photo::matting::{apply_cutout, composite_backdrop};
 use pbe_core::photo::RgbaImage;
 
 use crate::photo::doc::{DocState, Layer};
 use crate::preview::downscale_to;
 
-/// Ghép tài liệu ở tỉ lệ `scale` (1.0 = độ phân giải thật).
-pub fn render(state: &DocState, scale: f64) -> RgbaImage {
+/// Ảnh nền ở tỉ lệ `scale` đã Adjust + Unsharp Mask (chưa tách nền, chưa xoay tự do) và tỉ lệ
+/// thực tế sau khi làm tròn.
+fn adjusted_background(state: &DocState, scale: f64) -> (RgbaImage, f64) {
     let bg = &state.background;
     let full_long = bg.img.long_side();
     let mut canvas = if scale < 0.999 {
@@ -20,23 +23,46 @@ pub fn render(state: &DocState, scale: f64) -> RgbaImage {
     } else {
         bg.img.clone()
     };
+    let s = canvas.w as f64 / bg.img.w.max(1) as f64;
+    if canvas.is_empty() {
+        return (canvas, s);
+    }
+    if !bg.adjust.is_default() {
+        canvas = apply_photo_adjust(&canvas, &bg.adjust, Some(full_long));
+    }
+    if !bg.sharpen.is_default() {
+        canvas = unsharp_mask(&canvas, &bg.sharpen, s);
+    }
+    (canvas, s)
+}
+
+/// Nền cho chế độ chỉnh vùng tách nền: chỉ ảnh nền đã chỉnh màu — không matte, không xoay tự do,
+/// không layer — để pixel trên canvas khớp đúng toạ độ của matte khi tô cọ.
+pub fn render_mask_base(state: &DocState, scale: f64) -> RgbaImage {
+    adjusted_background(state, scale).0
+}
+
+/// Ghép tài liệu ở tỉ lệ `scale` (1.0 = độ phân giải thật).
+pub fn render(state: &DocState, scale: f64) -> RgbaImage {
+    let bg = &state.background;
+    let (mut canvas, s) = adjusted_background(state, scale);
     if canvas.is_empty() {
         return canvas;
     }
-    // tỉ lệ thực tế sau khi làm tròn
-    let s = canvas.w as f64 / bg.img.w.max(1) as f64;
 
     if !bg.visible {
         canvas = RgbaImage::new(canvas.h, canvas.w);
     } else {
-        if !bg.adjust.is_default() {
-            canvas = apply_photo_adjust(&canvas, &bg.adjust, Some(full_long));
-        }
-        if !bg.sharpen.is_default() {
-            canvas = unsharp_mask(&canvas, &bg.sharpen, s);
+        // Tách nền: matte → alpha (sau chỉnh màu để khử màu viền dùng đúng màu đang thấy).
+        if let Some(c) = &bg.cutout {
+            apply_cutout(&mut canvas, c, s);
         }
         if bg.angle.abs() > 1e-6 {
             canvas = rotate_cover(&canvas, bg.angle);
+        }
+        // Nền thay thế vẽ sau khi xoay để luôn phủ kín khung.
+        if let Some(c) = &bg.cutout {
+            canvas = composite_backdrop(&canvas, &c.backdrop);
         }
     }
 

@@ -60,6 +60,26 @@ impl Framebuffer {
         }
     }
 
+    /// Ô vuông trong một hình chữ nhật (toạ độ framebuffer, có thể ra ngoài) — chỗ ảnh trong
+    /// suốt trên canvas. Ô bám theo góc của hình chữ nhật nên không "trượt" khi cuộn.
+    #[allow(clippy::too_many_arguments)]
+    pub fn checker_rect(&mut self, x: f32, y: f32, w: f32, h: f32, cell: usize, a: [u8; 4], b: [u8; 4]) {
+        let cell = cell.max(1) as f32;
+        let x0 = x.floor().max(0.0) as usize;
+        let y0 = y.floor().max(0.0) as usize;
+        let x1 = ((x + w).ceil().max(0.0) as usize).min(self.w);
+        let y1 = ((y + h).ceil().max(0.0) as usize).min(self.h);
+        for yy in y0..y1 {
+            let cy = ((yy as f32 - y) / cell).floor() as i64;
+            for xx in x0..x1 {
+                let cx = ((xx as f32 - x) / cell).floor() as i64;
+                let c = if (cx + cy).rem_euclid(2) == 0 { a } else { b };
+                let i = (yy * self.w + xx) * 4;
+                self.data[i..i + 4].copy_from_slice(&c);
+            }
+        }
+    }
+
     #[inline]
     fn blend(&mut self, x: usize, y: usize, src: [u8; 4]) {
         if src[3] == 0 || x >= self.w || y >= self.h {

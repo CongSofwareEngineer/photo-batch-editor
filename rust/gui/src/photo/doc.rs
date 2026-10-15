@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use pbe_core::photo::effects::{PhotoAdjust, SharpenSettings};
 use pbe_core::photo::geometry::{flip_point, normalize_angle, rotate90_point};
 use pbe_core::photo::history::History;
+use pbe_core::photo::matting::Cutout;
 use pbe_core::photo::RgbaImage;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -194,6 +195,9 @@ pub struct Background {
     pub sharpen: SharpenSettings, // Unsharp Mask (xem docs/instruction/sharpen.md)
     pub angle: f64, // xoay tự do (làm thẳng), độ; ảnh được phóng để phủ kín
     pub visible: bool,
+    /// Tách nền: matte + tinh chỉnh viền + nền thay thế (xem docs/instruction/background-removal.md).
+    /// Matte luôn cùng cỡ `img` (crop / xoay 90° / lật áp cho cả hai).
+    pub cutout: Option<Cutout>,
 }
 
 /// Ảnh chụp toàn bộ tài liệu — đơn vị undo / redo.
@@ -229,9 +233,10 @@ impl Document {
                     sharpen: SharpenSettings::default(),
                     angle: 0.0,
                     visible: true,
+                    cutout: None,
                 },
                 layers: vec![],
-                },
+            },
             history: History::default(),
             source,
             name,
@@ -405,6 +410,9 @@ impl Document {
         }
         self.push_undo("Crop", None);
         self.state.background.img = self.state.background.img.crop(x, y, w, h);
+        if let Some(c) = &mut self.state.background.cutout {
+            c.matte = c.matte.crop(x, y, w, h);
+        }
         let (dx, dy) = (-(x as f64), -(y as f64));
         for l in &mut self.state.layers {
             l.translate(dx, dy);
@@ -416,6 +424,9 @@ impl Document {
         self.push_undo("Rotate 90°", None);
         let size = self.size();
         self.state.background.img = rotate90_image(&self.state.background.img, clockwise);
+        if let Some(c) = &mut self.state.background.cutout {
+            c.matte = c.matte.rotate90(clockwise);
+        }
         let f = move |x: f64, y: f64| rotate90_point(x, y, size, clockwise);
         let rot = if clockwise { 90.0 } else { -90.0 };
         for l in &mut self.state.layers {
@@ -428,6 +439,9 @@ impl Document {
         self.push_undo("Flip", None);
         let size = self.size();
         self.state.background.img = flip_image(&self.state.background.img, horizontal);
+        if let Some(c) = &mut self.state.background.cutout {
+            c.matte = c.matte.flip(horizontal);
+        }
         let f = move |x: f64, y: f64| flip_point(x, y, size, horizontal);
         let mirror = if horizontal { "h" } else { "v" };
         for l in &mut self.state.layers {

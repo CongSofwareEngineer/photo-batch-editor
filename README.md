@@ -25,7 +25,11 @@ sub-folders. Originals are never modified.
   blur / pixelate areas; crop (free, 1:1, 4:3, 16:9, 9:16, rule-of-thirds grid), rotate 90° /
   straighten / flip, brightness / contrast / saturation / temperature / sharpness / clarity (same
   algorithms as the batch), **Unsharp Mask** sharpening (Amount / Radius / Threshold, Light /
-  Medium / Strong presets). **Collage** window: 8 layouts, size, spacing, corner radius,
+  Medium / Strong presets). **Background removal** (AI, MODNet): cut the person out of the
+  background, check the selection (the part to remove is shown in red) and fix it with an Add /
+  Subtract brush before applying, then keep it transparent, use an ID-photo colour (white, blue, light blue, red, grey, or
+  any colour) or another photo as the new background; shift / feather the edge and clean the old
+  background colour out of hair; insert a PNG (clothes, accessories) on top. **Collage** window: 8 layouts, size, spacing, corner radius,
   background colour, drag / scroll to frame each photo, then open the result in the editor.
   Wheel zooms at the cursor, Space + drag pans, Ctrl+0 fit, Ctrl+1 100 %, Ctrl+Z / Ctrl+Shift+Z,
   Ctrl+J duplicate layer, Ctrl+E export. Export JPEG (quality) or PNG.
@@ -46,6 +50,8 @@ sub-folders. Originals are never modified.
   is used.
 * The current Rust port runs on the **CPU**. The GPU (CUDA/CuPy) branch of the Python version was
   not ported. Super Resolution is available behind the Cargo feature `sr` (pulls ONNX Runtime).
+  Background removal uses the `bgremove` feature of `pbe-core` (ONNX Runtime), always enabled by the
+  GUI; the ONNX Runtime binaries are downloaded by the `ort` crate on the first build.
 * FFmpeg for the Video editor: put the binary in `ffmpeg/` (or set `PBE_FFMPEG`, or have `ffmpeg`
   on `PATH`).
 
@@ -62,6 +68,7 @@ cargo run -p pbe-gui       # the GUI (egui + wgpu)
 cd rust
 cargo test                 # core logic + CPU parts of the GUI
 cargo test --features sr   # adds the Super Resolution (ONNX) test
+cargo test -p pbe-core --features bgremove --test bg_remove_onnx   # background removal (MODNet)
 cargo test --test video_export   # real FFmpeg export (skipped when FFmpeg is missing)
 ```
 
@@ -75,7 +82,8 @@ the tolerance the Python tests allowed); reference fixtures live in `rust/core/t
 | Windows 10 / 11 (64-bit) | Windows | `build_rust_windows.bat` | `rust\target\release\photo-batch-editor.exe` |
 | macOS 11+ (MacBook) | Mac | `./build_rust_mac.sh` | `rust/target/release/bundle/osx/Photo Batch Editor.app` |
 
-The macOS script builds the release binary and bundles it with `cargo-bundle`, copying `assets/`,
+The Windows script also copies `models/` to `rust\target\release\models` — ship that folder next to
+the `.exe`. The macOS script builds the release binary and bundles it with `cargo-bundle`, copying `assets/`,
 `models/`, `ffmpeg/` and the README into the app. The Windows script builds the release `.exe`.
 Rust does not cross-compile: build the Windows app on Windows and the Mac app on a Mac.
 
@@ -98,7 +106,15 @@ On macOS `%APPDATA%\PhotoBatchEditor` is `~/Library/Application Support/PhotoBat
 The GUI reads the **same** `auth.json`, `state.json` and `presets` folder as the old Python version
 did, so existing user data keeps working.
 
-## Super Resolution model
+## Models
+
+### Background removal
+
+`models/modnet.onnx` is MODNet (portrait matting, [ZHKKKe/MODNet](https://github.com/ZHKKKe/MODNet)),
+ONNX export from [Xenova/modnet](https://huggingface.co/Xenova/modnet), Apache-2.0 — see
+`models/LICENSE-MODNet.txt`. It is made for portraits; other subjects may not cut out cleanly.
+
+### Super Resolution
 
 `models/realesr-general-x4v3.onnx` is the official Real-ESRGAN weights converted to ONNX. The ONNX
 export tool was removed together with the Python port; the model file is kept in the repository.
@@ -117,15 +133,15 @@ rust/                    Cargo workspace
   core/                  pbe-core — all logic (no UI)
     src/                 version, system, paths, settings, scanner, auth, i18n,
                          presets, image_size, resize, backend, adjustments, pipeline,
-                         io_utils, enhance (feature sr), batch
-    src/photo/           photo document: effects, geometry, history, collage, image_io
+                         io_utils, enhance (feature sr), bg_remove (feature bgremove), batch
+    src/photo/           photo document: effects, geometry, history, collage, image_io, matting
     src/video/           video: ffmpeg, project, export
     tests/               port of the old Python suite + reference fixtures
   gui/                   pbe-gui — egui + wgpu GUI, binary photo-batch-editor
     src/                 app shell, sidebar, login, batch, adjust, preview,
                          photo editor, video editor, settings, theme
     tests/               CPU render tests (framebuffer, compositing, crop/rotate)
-models/                  Super Resolution ONNX model
+models/                  ONNX models: Super Resolution, background removal (MODNet)
 presets_builtin/         built-in filter settings
 ffmpeg/                  FFmpeg binary for the Video editor (not committed)
 assets/                  app icons

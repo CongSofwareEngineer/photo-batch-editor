@@ -13,6 +13,9 @@
     `mod.rs` (bố cục Photoshop: menu, options bar, toolbox dọc, status bar; zoom / pan; công cụ Move,
     Crop, Blur, Hand, Zoom; nút góc đổi cỡ; panel Thuộc tính / Adjust / Độ nét / Layer / Xuất),
     `collage.rs` (cửa sổ cắt ghép — xem collage.md)
+  - Tách nền / thay nền: `rust/core/src/photo/matting.rs`, `rust/core/src/bg_remove.rs`,
+    `rust/gui/src/photo/mask_edit.rs` (chế độ chỉnh vùng chọn bằng cọ trước khi tách) — xem
+    [background-removal.md](background-removal.md)
   - Dùng chung: `rust/gui/src/app.rs`, `sidebar.rs` (trang photo), `theme.rs`, `rust/core/src/i18n*`
 - **Changelog:** [../changelog/photo-editor.md](../changelog/photo-editor.md)
 - **Ghi chú:** mã Python (`core/photo/`, `ui/photo/`) đã xoá; logic → `rust/core/src/photo/`; GUI → `rust/gui/src/photo/` (egui + framebuffer wgpu). **Chưa** port: layer chữ, file dự án `.pbep`. Chi tiết: [rust-port.md](rust-port.md).
@@ -27,7 +30,7 @@
 - **Bố cục kiểu Photoshop** (thứ tự panel egui: menu → options → status → toolbox → panel phải → canvas):
   - **Thanh menu** (trên cùng): File (Mở ảnh Ctrl+O, Ảnh ghép mới…, Chèn ảnh, Xuất Ctrl+E, Đóng ảnh),
     Edit (Hoàn tác Ctrl+Z, Làm lại Ctrl+Shift+Z, Nhân đôi layer Ctrl+J, Xoá layer Del), Image (xoay trái /
-    phải 90°, lật ngang / dọc, Cắt, Đặt lại chỉnh sửa), View (phóng to / thu nhỏ, Vừa màn hình Ctrl+0,
+    phải 90°, lật ngang / dọc, Cắt, Tách nền, Đặt lại chỉnh sửa), View (phóng to / thu nhỏ, Vừa màn hình Ctrl+0,
     100 % Ctrl+1); tên ảnh (• = chưa lưu); bên phải: ↶ ↷ + nút Xuất.
   - **Thanh tuỳ chọn** (dưới menu, như options bar): icon công cụ đang chọn + tuỳ chọn riêng: Move (Chèn
     ảnh, cỡ layer đang chọn, gợi ý), Crop (tỉ lệ Tự do / 1:1 / 4:3 / 16:9 / 9:16, Áp dụng / Huỷ, cỡ vùng cắt),
@@ -35,7 +38,8 @@
   - **Thanh công cụ dọc** (trái, 48 px, hằng `TOOLBAR`): Move V, Crop C | Blur B, Chèn ảnh I, Collage L |
     Hand H, Zoom Z. Icon vẽ bằng vector (`paint_icon`) nên không phụ thuộc font; tooltip "Tên (phím)".
     Chèn ảnh / Collage là nút hành động (không phải công cụ). Chưa mở ảnh thì chỉ Collage bấm được.
-  - **Panel phải**: Thuộc tính (opacity, độ mạnh / kiểu blur của layer chọn), Adjust (6 thanh: sáng, tương
+  - **Panel phải**: Thuộc tính (opacity, độ mạnh / kiểu blur của layer chọn), Tách nền (AI xoá phông, nền
+    trong suốt / màu ảnh thẻ / ảnh, tinh chỉnh viền — xem [background-removal.md](background-removal.md)), Adjust (6 thanh: sáng, tương
     phản, bão hoà, nhiệt độ, Sharpness, Clarity + Làm thẳng −45…45°), Tăng độ nét (Unsharp Mask — xem
     [sharpen.md](sharpen.md)), Layer (trên → dưới, 👁 ẩn/hiện, ▲ ▼, nhân đôi, xoá; dòng "Nền" cuối cùng chỉ
     ẩn/hiện), Xuất (JPEG chất lượng / PNG).
@@ -49,6 +53,7 @@
 - **Phím tắt:** chữ cái chọn công cụ chỉ khi không gõ trong ô nhập (`egui_wants_keyboard_input`) và không giữ
   Ctrl/Cmd; khi cửa sổ Collage mở thì editor bỏ qua mọi phím. Kéo / đổi cỡ / nhích / slider dùng merge key nên
   mỗi thao tác = 1 bước undo.
+- **Canvas** hiện ô vuông xám / trắng (như Photoshop) ở chỗ ảnh trong suốt (PNG, nền đã tách).
 - **Ảnh ghép**: kết quả cửa sổ Collage mở thành tài liệu mới tên "collage" (`Document::new_untitled`,
   đánh dấu chưa lưu); xuất mặc định `collage.jpg` trong thư mục ảnh gần nhất.
 

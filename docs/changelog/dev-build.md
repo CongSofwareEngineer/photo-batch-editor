@@ -22,3 +22,4 @@
   Inno Setup, build dừng nếu ký lỗi — user máy khác cài `PhotoBatchEditor.cer` 1 lần là hết cảnh báo Windows
   Defender/SmartScreen, không mất tiền mua chứng chỉ thương mại.
 - 2026-10-09 | Sửa | Dev & Build (Rust): xoá bản Python nên logic build/dev chuyển sang Rust — bỏ live-reload (`dev.bat` / `dev.sh` / `ui/devtools.py`), bỏ build PyInstaller/installer/ký số/bootloader và `tools/fetch_ffmpeg.py`, `tools/bump_build.py`; dev = `cargo run -p pbe-gui`, build = `build_rust_windows.bat` (`.exe`) và `build_rust_mac.sh` (`.app` qua cargo-bundle). `version.json` vẫn là nguồn version, đọc bằng `version.rs` — vì đã chuyển hẳn sang Rust, các script build Python không còn dùng.
+- 2026-10-15 | Sửa | Build Windows: `build_rust_windows.bat` chép `models/` cạnh `photo-batch-editor.exe` (`target\release\models`); app tìm model ở `<thư mục exe>/models` và `.app/Contents/Resources/models` — trước đây exe chỉ tìm theo đường dẫn lúc compile nên máy khác không thấy model tách nền.

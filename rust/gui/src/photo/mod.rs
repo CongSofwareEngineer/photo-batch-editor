@@ -5,11 +5,14 @@
 
 pub mod collage;
 pub mod doc;
+pub mod mask_edit;
 pub mod render;
 
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex};
 
 use egui::{Color32, Key, Pos2, RichText, Stroke, Ui};
+use pbe_core::bg_remove::BackgroundRemover;
 use pbe_core::photo::effects::{
     PhotoAdjust, SharpenSettings, ADJUST_SLIDERS, BLUR_MODES, SHARPEN_SLIDERS,
 };
@@ -18,6 +21,7 @@ use pbe_core::photo::geometry::{
     FIT_MARGIN,
 };
 use pbe_core::photo::image_io::{default_export_path, load_rgba, save_image, OPEN_FILTER_EXTS};
+use pbe_core::photo::matting::{Backdrop, Cutout, Matte, BACKDROP_COLORS, CUTOUT_SLIDERS};
 use pbe_core::photo::RgbaImage;
 use pbe_core::settings::SliderSpec;
 
@@ -27,6 +31,7 @@ use crate::theme;
 use crate::tr;
 use crate::widgets;
 use doc::{Document, Layer};
+use mask_edit::{MaskEdit, MaskView};
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum Tool {
@@ -95,6 +100,27 @@ const STRAIGHTEN_SPEC: SliderSpec = SliderSpec {
     decimals: 1,
 };
 
+/// Tách nền đang chạy ở thread nền (model mất ~0.2–1 s, lần đầu thêm thời gian nạp model).
+struct BgJob {
+    rx: mpsc::Receiver<Result<Matte, String>>,
+    /// Tài liệu + cỡ ảnh lúc bắt đầu: đổi ảnh / crop / xoay trong lúc chạy thì bỏ kết quả.
+    doc_serial: u64,
+    size: (usize, usize),
+}
+
+/// Model tách nền nạp một lần, dùng chung cho mọi lần chạy.
+static REMOVER: Mutex<Option<Arc<BackgroundRemover>>> = Mutex::new(None);
+
+fn background_remover() -> Result<Arc<BackgroundRemover>, String> {
+    let mut slot = REMOVER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(r) = slot.as_ref() {
+        return Ok(r.clone());
+    }
+    let r = Arc::new(BackgroundRemover::new(None)?);
+    *slot = Some(r.clone());
+    Ok(r)
+}
+
 pub struct PhotoEditorView {
     pub doc: Option<Document>,
     scale: f64,
@@ -119,6 +145,14 @@ pub struct PhotoEditorView {
     /// Toạ độ ảnh dưới con trỏ (thanh trạng thái).
     cursor: Option<(f64, f64)>,
     collage: collage::CollageView,
+    bg_job: Option<BgJob>,
+    /// Đang chỉnh vùng chọn tách nền (sau khi AI chạy xong, trước khi áp dụng).
+    mask_edit: Option<MaskEdit>,
+    /// Ảnh nền (chưa tách, chưa xoay, không layer) cỡ xem trước cho chế độ chỉnh vùng + revision.
+    mask_base: Option<RgbaImage>,
+    mask_base_rev: u64,
+    /// Tăng mỗi lần mở tài liệu khác (để nhận ra kết quả tách nền của ảnh cũ).
+    doc_serial: u64,
 }
 
 impl Default for PhotoEditorView {
@@ -146,6 +180,11 @@ impl Default for PhotoEditorView {
             fit_requested: false,
             cursor: None,
             collage: collage::CollageView::default(),
+            bg_job: None,
+            mask_edit: None,
+            mask_base: None,
+            mask_base_rev: 0,
+            doc_serial: 0,
         }
     }
 }
@@ -169,6 +208,9 @@ impl PhotoEditorView {
         let long = doc.state.background.img.long_side().max(1);
         self.preview_scale = (PREVIEW_LONG_SIDE as f64 / long as f64).min(1.0);
         self.doc = Some(doc);
+        self.doc_serial += 1;
+        self.mask_edit = None;
+        self.mask_base = None;
         self.composite = None;
         self.composite_rev = 0;
         self.fit_requested = true;
@@ -209,6 +251,8 @@ impl PhotoEditorView {
     // --- Vẽ -------------------------------------------------------------------------------
 
     pub fn ui(&mut self, ui: &mut Ui) {
+        self.poll_bg_job(ui.ctx());
+        self.check_mask_edit();
         self.ui_menu_bar(ui);
         self.ui_options_bar(ui);
         self.ui_status_bar(ui);
@@ -254,10 +298,13 @@ impl PhotoEditorView {
     /// Thanh menu kiểu Photoshop: File / Edit / Image / View + Xuất, Hoàn tác ở bên phải.
     fn ui_menu_bar(&mut self, ui: &mut Ui) {
         let has = self.doc.is_some();
+        let editing = self.mask_edit.is_some();
         let (can_undo, can_redo, has_layer) = match &self.doc {
-            Some(d) => (d.history.can_undo(), d.history.can_redo(), d.selected.is_some()),
-            None => (false, false, false),
+            Some(d) if !editing => (d.history.can_undo(), d.history.can_redo(), d.selected.is_some()),
+            _ => (false, false, false),
         };
+        // Đang chỉnh vùng tách nền: không cho đổi hình học ảnh (matte phải khớp từng pixel).
+        let geo = has && !editing;
         egui::Panel::top(egui::Id::new("photo_menu"))
             .frame(theme::bar())
             .show(ui, |ui| {
@@ -301,29 +348,32 @@ impl PhotoEditorView {
                         }
                     });
                     ui.menu_button(tr("Image"), |ui| {
-                        if menu_item(ui, &tr("Rotate 90° left"), "", has) {
+                        if menu_item(ui, &tr("Rotate 90° left"), "", geo) {
                             if let Some(d) = &mut self.doc {
                                 d.rotate90(false);
                             }
                         }
-                        if menu_item(ui, &tr("Rotate 90° right"), "", has) {
+                        if menu_item(ui, &tr("Rotate 90° right"), "", geo) {
                             if let Some(d) = &mut self.doc {
                                 d.rotate90(true);
                             }
                         }
-                        if menu_item(ui, &tr("Flip horizontal"), "", has) {
+                        if menu_item(ui, &tr("Flip horizontal"), "", geo) {
                             if let Some(d) = &mut self.doc {
                                 d.flip(true);
                             }
                         }
-                        if menu_item(ui, &tr("Flip vertical"), "", has) {
+                        if menu_item(ui, &tr("Flip vertical"), "", geo) {
                             if let Some(d) = &mut self.doc {
                                 d.flip(false);
                             }
                         }
                         ui.separator();
-                        if menu_item(ui, &tr("Crop"), "C", has) {
+                        if menu_item(ui, &tr("Crop"), "C", geo) {
                             self.select_tool(Tool::Crop);
+                        }
+                        if menu_item(ui, &tr("Remove background"), "", geo && self.bg_job.is_none()) {
+                            self.start_remove_background(ui.ctx());
                         }
                         if menu_item(ui, &tr("Reset adjustments"), "", has) {
                             self.reset_adjustments();
@@ -389,6 +439,11 @@ impl PhotoEditorView {
                         ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::hover());
                     paint_icon(ui.painter(), icon_rect, ToolButton::Tool(self.tool), theme::CYAN);
                     ui.separator();
+                    if let Some(edit) = &mut self.mask_edit {
+                        let action = mask_controls(ui, edit, true);
+                        self.run_mask_action(action);
+                        return;
+                    }
                     match self.tool {
                         Tool::Move => self.ui_move_options(ui, has),
                         Tool::Crop => self.ui_crop_options(ui),
@@ -514,7 +569,7 @@ impl PhotoEditorView {
                         ui.add_space(2.0);
                         continue;
                     };
-                    let enabled = has || button == ToolButton::Collage;
+                    let enabled = (has || button == ToolButton::Collage) && self.mask_edit.is_none();
                     let selected = has && button == ToolButton::Tool(self.tool);
                     let tip = format!("{} ({})", tr(label), key.name());
                     if tool_button(ui, button, selected, enabled)
@@ -556,8 +611,14 @@ impl PhotoEditorView {
                                 .color(theme::TEXT_DIM),
                         );
                     }
+                    let busy = self.bg_job.is_some();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(text(format!("{} {}", doc.state.layers.len(), tr("layers"))).color(theme::TEXT_FAINT));
+                        if busy {
+                            ui.separator();
+                            ui.label(text(tr("Removing background…")).color(theme::CYAN));
+                            ui.spinner();
+                        }
                     });
                 });
             });
@@ -571,6 +632,8 @@ impl PhotoEditorView {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     self.ui_properties_panel(ui);
+                    ui.add_space(6.0);
+                    self.ui_cutout_panel(ui);
                     ui.add_space(6.0);
                     self.ui_adjust_panel(ui);
                     ui.add_space(6.0);
@@ -649,6 +712,278 @@ impl PhotoEditorView {
             });
             widgets::subtitle(ui, &tr("Threshold keeps smooth areas (skin, sky) from getting grainy."));
         });
+    }
+
+    /// Mục "Tách nền": chạy AI, chọn nền mới (trong suốt / màu ảnh thẻ / ảnh), tinh chỉnh viền.
+    fn ui_cutout_panel(&mut self, ui: &mut Ui) {
+        if let Some(edit) = &mut self.mask_edit {
+            let mut action = None;
+            widgets::section(ui, &tr("Background removal"), true, |ui| {
+                widgets::subtitle(
+                    ui,
+                    &tr("Red = will be removed. Paint over mistakes, then press Apply."),
+                );
+                ui.horizontal_wrapped(|ui| action = mask_controls(ui, edit, false));
+                widgets::subtitle(
+                    ui,
+                    &tr("Alt + paint = opposite brush · [ ] = brush size · X = switch Add / Subtract"),
+                );
+            });
+            self.run_mask_action(action);
+            return;
+        }
+        let busy = self.bg_job.is_some();
+        let export_png = self.export_fmt == "png";
+        let mut start = false;
+        let mut pick_image = false;
+        let mut edit_selection = false;
+        let Some(doc) = &mut self.doc else { return };
+        widgets::section(ui, &tr("Background removal"), true, |ui| {
+            let Some(cut) = doc.state.background.cutout.clone() else {
+                widgets::subtitle(
+                    ui,
+                    &tr("AI separates the person from the background (works best with portraits)."),
+                );
+                ui.horizontal(|ui| {
+                    if widgets::primary(ui, &tr("Remove background"), !busy).clicked() {
+                        start = true;
+                    }
+                    if busy {
+                        ui.spinner();
+                    }
+                });
+                return;
+            };
+
+            ui.label(RichText::new(tr("New background")).size(12.0).color(theme::TEXT_DIM));
+            let mut backdrop = cut.backdrop.clone();
+            let mut merge = None;
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .selectable_label(backdrop == Backdrop::Transparent, tr("Transparent"))
+                    .clicked()
+                {
+                    backdrop = Backdrop::Transparent;
+                }
+                for (label, rgb) in BACKDROP_COLORS {
+                    let selected = backdrop == Backdrop::Color(rgb);
+                    if color_swatch(ui, rgb, selected).on_hover_text(tr(label)).clicked() {
+                        backdrop = Backdrop::Color(rgb);
+                    }
+                }
+                let mut custom = match backdrop {
+                    Backdrop::Color(c) => c,
+                    _ => [255, 255, 255],
+                };
+                if ui
+                    .color_edit_button_srgb(&mut custom)
+                    .on_hover_text(tr("Custom colour"))
+                    .changed()
+                {
+                    backdrop = Backdrop::Color(custom);
+                    merge = Some("backdrop_color");
+                }
+                let is_image = matches!(backdrop, Backdrop::Image(_));
+                if ui.selectable_label(is_image, tr("Image…")).clicked() {
+                    pick_image = true;
+                }
+            });
+            if backdrop != cut.backdrop {
+                doc.push_undo("Background", merge);
+                if let Some(c) = &mut doc.state.background.cutout {
+                    c.backdrop = backdrop.clone();
+                }
+            }
+            if backdrop == Backdrop::Transparent && !export_png {
+                widgets::subtitle(ui, &tr("Export as PNG to keep transparency."));
+            }
+            ui.add_space(4.0);
+
+            let mut settings = cut.settings;
+            let mut changed = false;
+            for spec in CUTOUT_SLIDERS.iter() {
+                let mut v = settings.get(spec.key).unwrap_or(spec.default);
+                if widgets::slider_row(ui, spec, &tr(spec.label), &mut v) {
+                    settings.set(spec.key, v);
+                    changed = true;
+                }
+            }
+            ui.checkbox(&mut settings.decontaminate, tr("Clean edge colour"))
+                .on_hover_text(tr("Removes the old background colour left in hair and edges."));
+            if (changed || settings.decontaminate != cut.settings.decontaminate)
+                && settings != cut.settings
+            {
+                doc.push_undo("Refine edge", Some("cutout_refine"));
+                if let Some(c) = &mut doc.state.background.cutout {
+                    c.settings = settings;
+                }
+            }
+            ui.horizontal(|ui| {
+                if widgets::secondary(ui, &tr("Run again"), !busy)
+                    .on_hover_text(tr("Run the AI again, e.g. after cropping"))
+                    .clicked()
+                {
+                    start = true;
+                }
+                if widgets::secondary(ui, &tr("Edit selection"), !busy)
+                    .on_hover_text(tr("Show the selection and fix it with a brush"))
+                    .clicked()
+                {
+                    edit_selection = true;
+                }
+                if widgets::danger(ui, &tr("Restore background"), true).clicked() {
+                    doc.push_undo("Restore background", None);
+                    doc.state.background.cutout = None;
+                }
+                if busy {
+                    ui.spinner();
+                }
+            });
+            widgets::subtitle(
+                ui,
+                &tr("Tip: use Insert image to put a PNG (clothes, accessories) over the person."),
+            );
+        });
+        if start {
+            self.start_remove_background(ui.ctx());
+        }
+        if pick_image {
+            self.choose_backdrop_image();
+        }
+        if edit_selection {
+            let matte = self
+                .doc
+                .as_ref()
+                .and_then(|d| d.state.background.cutout.as_ref())
+                .map(|c| c.matte.clone());
+            if let Some(m) = matte {
+                self.mask_edit = Some(MaskEdit::new(&m, self.doc_serial));
+            }
+        }
+    }
+
+    /// Huỷ chế độ chỉnh vùng nếu tài liệu đã đổi (mở ảnh khác, đóng ảnh, đổi cỡ).
+    fn check_mask_edit(&mut self) {
+        let Some(e) = &self.mask_edit else { return };
+        let valid = e.doc_serial == self.doc_serial
+            && self.doc.as_ref().is_some_and(|d| d.size() == (e.w, e.h));
+        if !valid {
+            self.mask_edit = None;
+            self.mask_base = None;
+        }
+    }
+
+    fn run_mask_action(&mut self, action: Option<MaskAction>) {
+        match action {
+            Some(MaskAction::Apply) => self.apply_mask_edit(),
+            Some(MaskAction::Cancel) => {
+                self.mask_edit = None;
+                self.mask_base = None;
+            }
+            Some(MaskAction::Undo) => {
+                if let Some(e) = &mut self.mask_edit {
+                    e.undo_stroke();
+                }
+            }
+            Some(MaskAction::Reset) => {
+                if let Some(e) = &mut self.mask_edit {
+                    e.reset();
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Áp vùng đã chỉnh thành tách nền thật (1 bước undo của tài liệu).
+    fn apply_mask_edit(&mut self) {
+        let Some(edit) = self.mask_edit.take() else { return };
+        self.mask_base = None;
+        let Some(doc) = &mut self.doc else { return };
+        if doc.size() != (edit.w, edit.h) {
+            return;
+        }
+        let matte = edit.into_matte();
+        doc.push_undo("Remove background", None);
+        let bg = &mut doc.state.background;
+        bg.cutout = Some(match bg.cutout.take() {
+            // Chạy lại / sửa vùng: giữ nền mới và tinh chỉnh viền đã chọn.
+            Some(old) => Cutout { matte, ..old },
+            None => Cutout::new(matte),
+        });
+        bg.visible = true;
+    }
+
+    /// Chạy model tách nền ở thread nền; kết quả nhận trong [`Self::poll_bg_job`].
+    fn start_remove_background(&mut self, ctx: &egui::Context) {
+        if self.bg_job.is_some() {
+            return;
+        }
+        let Some(doc) = &self.doc else { return };
+        let img = doc.state.background.img.clone();
+        let size = (img.w, img.h);
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let result = background_remover().and_then(|r| r.matte(&img));
+            let _ = tx.send(result);
+            ctx.request_repaint();
+        });
+        self.error = None;
+        self.bg_job = Some(BgJob {
+            rx,
+            doc_serial: self.doc_serial,
+            size,
+        });
+    }
+
+    fn poll_bg_job(&mut self, ctx: &egui::Context) {
+        let Some(job) = &self.bg_job else { return };
+        let result = match job.rx.try_recv() {
+            Ok(r) => r,
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                return;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => Err("background thread stopped".to_string()),
+        };
+        let (serial, size) = (job.doc_serial, job.size);
+        self.bg_job = None;
+        match result {
+            Ok(matte) => {
+                let Some(doc) = &mut self.doc else { return };
+                if serial != self.doc_serial || doc.size() != size {
+                    self.error =
+                        Some(tr("The photo changed while removing the background. Please try again."));
+                    return;
+                }
+                // Chưa tách thật: hiện vùng AI chọn để người dùng xem và sửa, bấm Áp dụng mới tách.
+                self.mask_edit = Some(MaskEdit::new(&matte, serial));
+            }
+            Err(e) => self.error = Some(format!("{}: {e}", tr("Background removal failed"))),
+        }
+    }
+
+    fn choose_backdrop_image(&mut self) {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(tr("Choose background image"))
+            .add_filter(tr("Photos"), &OPEN_FILTER_EXTS.map(|e| e.trim_start_matches('.')));
+        if let Some(dir) = &self.last_dir {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(path) = dialog.pick_file() else { return };
+        match load_rgba(&path) {
+            Ok(img) => {
+                if let Some(d) = &mut self.doc {
+                    if d.state.background.cutout.is_some() {
+                        d.push_undo("Background", None);
+                        if let Some(c) = &mut d.state.background.cutout {
+                            c.backdrop = Backdrop::Image(Arc::new(img));
+                        }
+                    }
+                }
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
     }
 
     fn ui_properties_panel(&mut self, ui: &mut Ui) {
@@ -816,6 +1151,13 @@ impl PhotoEditorView {
 
     fn rebuild_composite(&mut self) {
         let Some(doc) = &self.doc else { return };
+        if self.mask_edit.is_some() {
+            if self.mask_base.is_none() || self.mask_base_rev != doc.revision {
+                self.mask_base = Some(render::render_mask_base(&doc.state, self.preview_scale));
+                self.mask_base_rev = doc.revision;
+            }
+            return;
+        }
         if self.composite.is_some() && self.composite_rev == doc.revision {
             return;
         }
@@ -864,7 +1206,9 @@ impl PhotoEditorView {
 
         // Con trỏ chuột theo công cụ.
         if let Some(pos) = resp.hover_pos() {
-            let icon = if pan_override || self.tool == Tool::Hand {
+            let icon = if self.mask_edit.is_some() && !pan_override {
+                egui::CursorIcon::Crosshair
+            } else if pan_override || self.tool == Tool::Hand {
                 if resp.dragged() {
                     egui::CursorIcon::Grabbing
                 } else {
@@ -887,6 +1231,12 @@ impl PhotoEditorView {
             resp.ctx.set_cursor_icon(icon);
         }
 
+        // Nhả chuột ở đâu cũng kết thúc nét cọ.
+        if !resp.ctx.input(|i| i.pointer.primary_down()) {
+            if let Some(e) = &mut self.mask_edit {
+                e.end_stroke();
+            }
+        }
         let Some(pos) = resp.interact_pointer_pos() else {
             if !resp.dragged() {
                 self.drag = None;
@@ -894,6 +1244,30 @@ impl PhotoEditorView {
             return;
         };
         let img_pt = self.to_image(rect, pos);
+
+        // Chỉnh vùng tách nền: chuột trái = tô cọ (Alt = cọ ngược lại); Space / chuột giữa vẫn cuộn.
+        if self.mask_edit.is_some() && !pan_override {
+            let start = resp
+                .ctx
+                .input(|i| i.pointer.press_origin())
+                .map(|p| self.to_image(rect, p))
+                .unwrap_or(img_pt);
+            if let Some(e) = &mut self.mask_edit {
+                if resp.drag_started() {
+                    e.begin_stroke(start, alt);
+                    e.stroke_to(img_pt, alt);
+                } else if resp.dragged() {
+                    e.stroke_to(img_pt, alt);
+                } else if resp.clicked() {
+                    e.begin_stroke(img_pt, alt);
+                    e.end_stroke();
+                }
+                if resp.drag_stopped() {
+                    e.end_stroke();
+                }
+            }
+            return;
+        }
 
         // Công cụ Zoom: bấm = phóng to tại điểm bấm, Alt + bấm = thu nhỏ.
         if resp.clicked() && self.tool == Tool::Zoom && !pan_override {
@@ -1009,7 +1383,10 @@ impl PhotoEditorView {
             (rect.width() as f64 * ppp) as usize,
             (rect.height() as f64 * ppp) as usize,
         );
-        let composite = self.composite.clone();
+        let composite = match (&mut self.mask_edit, &self.mask_base) {
+            (Some(e), Some(base)) => Some(e.shown(base, self.mask_base_rev).clone()),
+            _ => self.composite.clone(),
+        };
         let (scale, offset) = (self.scale, self.offset);
         let pending = self.crop_pending;
         let selected_bounds = if self.tool == Tool::Move {
@@ -1022,10 +1399,18 @@ impl PhotoEditorView {
 
         let fb = self.canvas.begin(pw.max(1), ph.max(1));
         fb.clear([0x0b, 0x10, 0x20, 255]);
-        // Ô vuông trong suốt chỉ ở vùng của ảnh.
+        // Ô vuông trong suốt (như Photoshop) chỉ ở vùng của ảnh.
         let (dx, dy) = (offset.0 * ppp, offset.1 * ppp);
         let (dw, dh) = (iw as f64 * scale * ppp, ih as f64 * scale * ppp);
-        fb.fill_rect(dx as f32, dy as f32, dw as f32, dh as f32, [0x16, 0x1e, 0x33, 255]);
+        fb.checker_rect(
+            dx as f32,
+            dy as f32,
+            dw as f32,
+            dh as f32,
+            (8.0 * ppp) as usize,
+            [0xcc, 0xcc, 0xcc, 255],
+            [0xff, 0xff, 0xff, 255],
+        );
         if let Some(img) = &composite {
             fb.draw_image(img, dx as f32, dy as f32, dw as f32, dh as f32, 1.0);
         }
@@ -1082,6 +1467,24 @@ impl PhotoEditorView {
             }
         }
         self.canvas.paint(ui, rect);
+        // Vòng tròn cỡ cọ dưới con trỏ (chế độ chỉnh vùng tách nền).
+        if let (Some(e), Some(pos)) = (&self.mask_edit, ui.ctx().pointer_hover_pos()) {
+            if rect.contains(pos) {
+                let r = (e.size / 2.0 * scale) as f32;
+                let painter = ui.painter_at(rect);
+                painter.circle_stroke(pos, r, Stroke::new(2.5, Color32::from_black_alpha(160)));
+                painter.circle_stroke(pos, r, Stroke::new(1.0, Color32::WHITE));
+                let invert = ui.input(|i| i.modifiers.alt);
+                let sign = if e.add != invert { "+" } else { "−" };
+                painter.text(
+                    pos + egui::vec2(r * 0.71 + 6.0, -(r * 0.71) - 6.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    sign,
+                    egui::FontId::proportional(16.0),
+                    Color32::WHITE,
+                );
+            }
+        }
     }
 
     // --- Lệnh -----------------------------------------------------------------------------
@@ -1096,8 +1499,12 @@ impl PhotoEditorView {
         if cmd && ui.input(|i| i.key_pressed(Key::O)) {
             self.choose_and_open();
         }
+        let editing = self.mask_edit.is_some();
+        if editing && !typing {
+            self.handle_mask_shortcuts(ui, cmd);
+        }
         // Phím chữ cái chọn công cụ (khi không gõ trong ô nhập).
-        if !typing && !cmd {
+        if !typing && !cmd && !editing {
             let key = TOOLBAR
                 .iter()
                 .flatten()
@@ -1125,6 +1532,23 @@ impl PhotoEditorView {
                 cmd && i.key_pressed(Key::J),
             )
         });
+        if editing {
+            // Ctrl+Z / Enter / Esc / Delete… thuộc về chế độ chỉnh vùng (handle_mask_shortcuts).
+            if fit {
+                self.fit_requested = true;
+            }
+            if hundred {
+                self.set_zoom(1.0);
+            }
+            if zoom_in {
+                self.zoom_step(1);
+            }
+            if zoom_out {
+                self.zoom_step(-1);
+            }
+            let _ = (undo, redo, delete, dup, export);
+            return;
+        }
         if undo {
             self.undo();
         }
@@ -1191,6 +1615,41 @@ impl PhotoEditorView {
         }
         if ui.input(|i| i.key_pressed(Key::Escape)) {
             self.crop_pending = None;
+        }
+    }
+
+    /// Phím của chế độ chỉnh vùng tách nền: Enter áp dụng, Esc huỷ, Ctrl+Z hoàn tác nét,
+    /// [ ] đổi cỡ cọ, X đổi Thêm / Bớt.
+    fn handle_mask_shortcuts(&mut self, ui: &mut Ui, cmd: bool) {
+        let (enter, esc, undo, smaller, bigger, swap) = ui.input(|i| {
+            (
+                i.key_pressed(Key::Enter),
+                i.key_pressed(Key::Escape),
+                cmd && !i.modifiers.shift && i.key_pressed(Key::Z),
+                i.key_pressed(Key::OpenBracket),
+                i.key_pressed(Key::CloseBracket),
+                !cmd && i.key_pressed(Key::X),
+            )
+        });
+        if let Some(e) = &mut self.mask_edit {
+            let max = brush_max(e);
+            if smaller {
+                e.size = (e.size / 1.2).max(2.0).round();
+            }
+            if bigger {
+                e.size = (e.size * 1.2).min(max).round();
+            }
+            if swap {
+                e.add = !e.add;
+            }
+        }
+        if undo {
+            self.run_mask_action(Some(MaskAction::Undo));
+        }
+        if enter {
+            self.run_mask_action(Some(MaskAction::Apply));
+        } else if esc {
+            self.run_mask_action(Some(MaskAction::Cancel));
         }
     }
 
@@ -1317,6 +1776,108 @@ fn resize_from_corner(
     let x = if pt.0 >= ax { ax } else { ax - w };
     let y = if pt.1 >= ay { ay } else { ay - h };
     (x, y, w, h)
+}
+
+/// Nút bấm trong chế độ chỉnh vùng tách nền.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MaskAction {
+    Apply,
+    Cancel,
+    Undo,
+    Reset,
+}
+
+/// Cỡ cọ lớn nhất (px ảnh).
+fn brush_max(e: &MaskEdit) -> f64 {
+    (e.w.max(e.h) as f64 / 2.0).max(50.0)
+}
+
+/// Điều khiển cọ: Thêm / Bớt, cỡ, độ cứng, chế độ xem, Áp dụng / Huỷ (`compact` = thanh tuỳ chọn:
+/// bỏ Hoàn tác / Bỏ nét tô).
+fn mask_controls(ui: &mut Ui, e: &mut MaskEdit, compact: bool) -> Option<MaskAction> {
+    let mut action = None;
+    if ui
+        .selectable_label(e.add, tr("+ Add"))
+        .on_hover_text(tr("Paint to keep more (X to switch)"))
+        .clicked()
+    {
+        e.add = true;
+    }
+    if ui
+        .selectable_label(!e.add, tr("− Subtract"))
+        .on_hover_text(tr("Paint to remove more (X to switch)"))
+        .clicked()
+    {
+        e.add = false;
+    }
+    ui.separator();
+    let max = brush_max(e);
+    ui.add(
+        egui::Slider::new(&mut e.size, 2.0..=max)
+            .logarithmic(true)
+            .step_by(1.0)
+            .suffix(" px")
+            .text(tr("Brush size")),
+    );
+    let mut hardness = e.hardness * 100.0;
+    if ui
+        .add(
+            egui::Slider::new(&mut hardness, 0.0..=100.0)
+                .step_by(1.0)
+                .suffix(" %")
+                .text(tr("Hardness")),
+        )
+        .changed()
+    {
+        e.hardness = hardness / 100.0;
+    }
+    ui.separator();
+    for (view, label) in [(MaskView::Overlay, "Selection"), (MaskView::Result, "Result")] {
+        if ui.selectable_label(e.view == view, tr(label)).clicked() {
+            e.view = view;
+        }
+    }
+    ui.separator();
+    if widgets::primary(ui, &tr("Apply"), true)
+        .on_hover_text(tr("Remove the background (Enter)"))
+        .clicked()
+    {
+        action = Some(MaskAction::Apply);
+    }
+    if !compact {
+        if widgets::secondary(ui, "↶", e.can_undo())
+            .on_hover_text(tr("Undo stroke (Ctrl+Z)"))
+            .clicked()
+        {
+            action = Some(MaskAction::Undo);
+        }
+        if widgets::secondary(ui, &tr("Discard strokes"), e.is_modified()).clicked() {
+            action = Some(MaskAction::Reset);
+        }
+    }
+    if widgets::secondary(ui, &tr("Cancel"), true)
+        .on_hover_text(tr("Esc"))
+        .clicked()
+    {
+        action = Some(MaskAction::Cancel);
+    }
+    action
+}
+
+/// Ô màu bấm được (màu nền ảnh thẻ).
+fn color_swatch(ui: &mut Ui, rgb: [u8; 3], selected: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+    let p = ui.painter();
+    p.rect_filled(rect.shrink(2.0), 4.0, Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+    let stroke = if selected {
+        Stroke::new(2.0, theme::CYAN)
+    } else if resp.hovered() {
+        Stroke::new(1.0, theme::TEXT_DIM)
+    } else {
+        Stroke::new(1.0, theme::BORDER)
+    };
+    p.rect_stroke(rect.shrink(1.0), 5.0, stroke, egui::StrokeKind::Inside);
+    resp
 }
 
 fn menu_item(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -> bool {

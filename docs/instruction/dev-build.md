@@ -12,7 +12,8 @@
   live-reload (`dev.bat` / `dev.sh`) tự restart khi lưu file; cơ chế này **đã bị xoá** cùng bản Python
   (không cần nữa — `cargo run` dựng lại đủ nhanh).
 - **Build Windows 10/11:** `build_rust_windows.bat` → `cargo build -p pbe-gui --release` → ra
-  `rust\target\release\photo-batch-editor.exe`.
+  `rust\target\release\photo-batch-editor.exe`, rồi chép `models/` thành `rust\target\release\models\`
+  (phát hành thì copy cả thư mục `models` cùng exe — model tách nền tìm ở `<thư mục exe>/models`).
 - **Build macOS:** `build_rust_mac.sh` → `cargo build -p pbe-gui --release` → `cargo bundle --release`,
   chép `assets/`, `models/`, `ffmpeg/` và README vào
   `rust/target/release/bundle/osx/Photo Batch Editor.app`.

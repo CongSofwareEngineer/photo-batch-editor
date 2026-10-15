@@ -3,6 +3,7 @@
 //! nên phải có test; phần vẽ widget của egui không test ở đây.
 
 use pbe_core::photo::effects::PhotoAdjust;
+use pbe_core::photo::matting::{Backdrop, Cutout, Matte};
 use pbe_core::photo::RgbaImage;
 use pbe_gui::fb::Framebuffer;
 use pbe_gui::photo::doc::{BlurLayer, Document, Layer};
@@ -216,4 +217,59 @@ fn layer_set_bounds_resizes_image_and_blur_layers() {
     let b = doc.selected_layer_mut().unwrap();
     b.set_bounds(5.0, 6.0, 0.0, 7.0); // cỡ tối thiểu 1 px
     assert_eq!(b.bounds(), (5.0, 6.0, 1.0, 7.0));
+}
+
+/// Matte "người" = nửa trái của ảnh `h × w`.
+fn left_half_matte(h: usize, w: usize) -> Matte {
+    let data = (0..h * w).map(|i| if i % w < w / 2 { 255 } else { 0 }).collect();
+    Matte::new(h, w, data)
+}
+
+#[test]
+fn render_cutout_replaces_background_at_every_scale() {
+    let mut doc = Document::new(RgbaImage::filled(40, 80, [200, 100, 50, 255]), None);
+    let mut cut = Cutout::new(left_half_matte(40, 80));
+    cut.settings.decontaminate = false;
+    cut.backdrop = Backdrop::Color([0, 0, 255]);
+    doc.state.background.cutout = Some(cut);
+    for scale in [1.0, 0.5] {
+        let out = render::render(&doc.state, scale);
+        let (h, w) = (out.h, out.w);
+        assert_eq!(out.px(h / 2, 2), [200, 100, 50, 255], "người giữ nguyên");
+        assert_eq!(out.px(h / 2, w - 3), [0, 0, 255, 255], "nền được thay");
+    }
+    // nền trong suốt → alpha 0 ở phông cũ (xuất PNG giữ trong suốt)
+    if let Some(c) = &mut doc.state.background.cutout {
+        c.backdrop = Backdrop::Transparent;
+    }
+    let out = render::render(&doc.state, 1.0);
+    assert_eq!(out.px(20, 79)[3], 0);
+    assert_eq!(out.px(20, 0)[3], 255);
+}
+
+#[test]
+fn cutout_matte_follows_crop_rotate_flip_and_undo() {
+    let mut doc = Document::new(RgbaImage::filled(40, 80, [200, 100, 50, 255]), None);
+    let mut cut = Cutout::new(left_half_matte(40, 80));
+    cut.settings.decontaminate = false;
+    doc.state.background.cutout = Some(cut);
+    let matte_size = |d: &Document| {
+        let m = &d.state.background.cutout.as_ref().unwrap().matte;
+        (m.w, m.h)
+    };
+    doc.rotate90(true);
+    assert_eq!(matte_size(&doc), doc.size());
+    // xoay phải: nửa trái (người) thành nửa trên
+    let out = render::render(&doc.state, 1.0);
+    assert_eq!(out.px(2, 20)[3], 255);
+    assert_eq!(out.px(77, 20)[3], 0);
+    doc.flip(false); // lật dọc: người xuống nửa dưới
+    let out = render::render(&doc.state, 1.0);
+    assert_eq!(out.px(77, 20)[3], 255);
+    doc.crop(0, 40, 40, 40); // chỉ còn phần người
+    assert_eq!(matte_size(&doc), (40, 40));
+    assert!(render::render(&doc.state, 1.0).data.chunks(4).all(|p| p[3] == 255));
+    // undo hết → về ảnh gốc, matte gốc
+    while doc.undo() {}
+    assert_eq!(matte_size(&doc), (80, 40));
 }
