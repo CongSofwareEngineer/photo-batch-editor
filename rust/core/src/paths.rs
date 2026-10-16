@@ -6,11 +6,15 @@ use std::path::{Path, PathBuf};
 
 pub const APP_NAME: &str = "PhotoBatchEditor";
 
-/// Thư mục chứa tài nguyên bundle. Khi chạy từ mã nguồn Rust: gốc dự án (thư mục chứa
+/// Thư mục chứa tài nguyên bundle. Bản cài (installer / `.app`): thư mục có `version.json`
+/// cạnh exe hoặc `Contents/Resources`. Khi chạy từ mã nguồn Rust: gốc dự án (thư mục chứa
 /// `rust/`), suy ra từ `CARGO_MANIFEST_DIR` (= `<root>/rust/core`).
 pub fn app_root() -> PathBuf {
     if let Ok(p) = env::var("PBE_APP_ROOT") {
         return PathBuf::from(p);
+    }
+    if let Some(dir) = installed_root() {
+        return dir;
     }
     // <root>/rust/core -> <root>
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -19,6 +23,13 @@ pub fn app_root() -> PathBuf {
         .and_then(|p| p.parent()) // <root>
         .map(|p| p.to_path_buf())
         .unwrap_or(manifest)
+}
+
+fn installed_root() -> Option<PathBuf> {
+    let exe_dir = env::current_exe().ok()?.parent()?.to_path_buf();
+    [exe_dir.clone(), exe_dir.join("..").join("Resources")]
+        .into_iter()
+        .find(|d| d.join("version.json").is_file())
 }
 
 /// Đường dẫn tuyệt đối của một tài nguyên bundle, vd. `resource_path(["models", "x.onnx"])`.

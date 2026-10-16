@@ -79,16 +79,33 @@ the tolerance the Python tests allowed); reference fixtures live in `rust/core/t
 
 | Target | Run on | Command | Result |
 |---|---|---|---|
-| Windows 10 / 11 (64-bit) | Windows | `build_rust_windows.bat` | `rust\target\release\photo-batch-editor.exe` |
-| macOS 11+ (MacBook) | Mac | `./build_rust_mac.sh` | `rust/target/release/bundle/osx/Photo Batch Editor.app` |
+| Windows 10 / 11 (64-bit) | Windows | `build_rust_windows.bat` | `installer_output\PhotoBatchEditor-Setup-X.Y.Z.build.exe` |
+| macOS 11+ (MacBook) | Mac | `./build_rust_mac.sh` | `installer_output/PhotoBatchEditor-X.Y.Z.build.dmg` |
 
-The Windows script also copies `models/` to `rust\target\release\models` — ship that folder next to
-the `.exe`. The macOS script builds the release binary and bundles it with `cargo-bundle`, copying `assets/`,
-`models/`, `ffmpeg/` and the README into the app. The Windows script builds the release `.exe`.
+**Every build gets a new version:** both scripts add 1 to `build` in `version.json` (the app version is
+`X.Y.Z.build`; change `X.Y.Z` by hand when releasing). Commit `version.json` after building.
+
+**Windows** — needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install JRSoftware.InnoSetup`) and `ffmpeg\ffmpeg.exe`. The script builds the release `.exe`
+(with icon + version info), signs it, packs it with `models/`, `presets_builtin/`, `ffmpeg/` and
+`version.json` into an installer (`installer.iss`: Program Files, Start Menu / Desktop shortcut,
+uninstall from Apps & features) and signs the Setup and uninstaller (`tools/sign_windows.ps1`).
+
+* Default: a **self-signed** certificate created on the build PC (the first time Windows asks to trust
+  it — click Yes). Send `installer_output\PhotoBatchEditor.cer` and `CaiChungChi.bat` together with the
+  Setup; on the other PC run `CaiChungChi.bat` once (it installs the certificate and unblocks the Setup),
+  then the Setup runs without the SmartScreen "Run anyway" prompt.
+* To avoid the prompt on **every** PC without that step, buy a code-signing certificate and set
+  `PBE_SIGN_PFX` + `PBE_SIGN_PFX_PASSWORD` (or `PBE_SIGN_THUMBPRINT` for a USB token) before building.
+
+**macOS** — needs `cargo install cargo-bundle` and a macOS `ffmpeg/ffmpeg`. The script builds the
+`.app`, copies `version.json`, `models/`, `presets_builtin/`, `ffmpeg/` into `Contents/Resources`,
+signs it and makes a `.dmg`. Without an Apple Developer ID it is signed ad-hoc (other Macs: right-click ›
+Open the first time). With one: `export PBE_MAC_SIGN_IDENTITY="Developer ID Application: … (TEAMID)"`
+and, to notarize, `xcrun notarytool store-credentials pbe-notary` once +
+`export PBE_NOTARY_PROFILE=pbe-notary` — then it opens on any Mac without warnings.
+
 Rust does not cross-compile: build the Windows app on Windows and the Mac app on a Mac.
-
-The app version comes from `version.json` at the repository root (`{"version": "1.0.0", "build": N}`,
-change `version` by hand when releasing).
 
 ## Where things are stored
 

@@ -1,4 +1,6 @@
 //! Điểm vào của app: mở cửa sổ eframe (egui + wgpu) và chạy [`pbe_gui::app::App`].
+// Bản release trên Windows không mở kèm cửa sổ console.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use pbe_gui::app;
 
