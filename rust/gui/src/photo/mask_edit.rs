@@ -1,12 +1,12 @@
 //! Chỉnh vùng chọn trước khi tách nền thật: hiện vùng AI đã chọn (phần sẽ bị xoá phủ đỏ + đường
-//! viền), tô cọ thêm / bớt, hoàn tác từng nét, rồi mới áp dụng. Xem
+//! viền), tô cọ thêm / bớt, đẩy viền, co / giãn viền cục bộ, hoàn tác từng nét, rồi mới áp dụng. Xem
 //! `docs/instruction/background-removal.md`.
 //!
 //! Matte sửa ở **cỡ thật** (để xuất file đúng) và song song ở cỡ xem trước (để vẽ lại nhanh).
 
 use std::sync::Arc;
 
-use pbe_core::photo::matting::{brush_line, Matte};
+use pbe_core::photo::matting::{brush_line, push_line, shift_line, Matte};
 use pbe_core::photo::RgbaImage;
 
 /// Số nét cọ hoàn tác được.
@@ -16,6 +16,73 @@ const TINT: [f32; 3] = [255.0, 40.0, 40.0];
 const TINT_STRENGTH: f32 = 0.55;
 /// Đường viền vùng chọn.
 const OUTLINE: [u8; 4] = [0, 230, 255, 255];
+
+/// Loại cọ sửa vùng chọn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaskBrush {
+    /// Tô thêm vào vùng giữ lại.
+    Add,
+    /// Tô bớt (thành vùng bị xoá).
+    Subtract,
+    /// Kéo viền theo hướng di chuột (ra ngoài = phình ra, vào trong = lõm vào), chỉ trong cọ.
+    Push,
+    /// Co viền lại trong phạm vi cọ (tô nhiều lần = co nhiều hơn).
+    Shrink,
+    /// Giãn viền ra trong phạm vi cọ.
+    Grow,
+}
+
+impl MaskBrush {
+    pub const ALL: [MaskBrush; 5] = [
+        MaskBrush::Add,
+        MaskBrush::Subtract,
+        MaskBrush::Push,
+        MaskBrush::Shrink,
+        MaskBrush::Grow,
+    ];
+
+    /// Cọ ngược lại (giữ Alt / phím X): Thêm ↔ Bớt, Co ↔ Giãn; Đẩy viền giữ nguyên.
+    pub fn opposite(self) -> MaskBrush {
+        match self {
+            MaskBrush::Add => MaskBrush::Subtract,
+            MaskBrush::Subtract => MaskBrush::Add,
+            MaskBrush::Shrink => MaskBrush::Grow,
+            MaskBrush::Grow => MaskBrush::Shrink,
+            MaskBrush::Push => MaskBrush::Push,
+        }
+    }
+
+    /// Nhãn nút (chưa dịch) + ký hiệu cạnh vòng cọ.
+    pub fn label(self) -> &'static str {
+        match self {
+            MaskBrush::Add => "+ Add",
+            MaskBrush::Subtract => "− Subtract",
+            MaskBrush::Push => "Push edge",
+            MaskBrush::Shrink => "Shrink edge",
+            MaskBrush::Grow => "Grow edge",
+        }
+    }
+
+    pub fn sign(self) -> &'static str {
+        match self {
+            MaskBrush::Add => "+",
+            MaskBrush::Subtract => "−",
+            MaskBrush::Push => "↔",
+            MaskBrush::Shrink => "›‹",
+            MaskBrush::Grow => "‹›",
+        }
+    }
+
+    pub fn tooltip(self) -> &'static str {
+        match self {
+            MaskBrush::Add => "Paint to keep more (X to switch)",
+            MaskBrush::Subtract => "Paint to remove more (X to switch)",
+            MaskBrush::Push => "Drag the edge: outward = selection grows, inward = it shrinks — only under the brush",
+            MaskBrush::Shrink => "Paint along the edge to pull it in (Alt = grow)",
+            MaskBrush::Grow => "Paint along the edge to push it out (Alt = shrink)",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaskView {
@@ -48,8 +115,7 @@ pub struct MaskEdit {
     /// Bản sao matte lúc bắt đầu nét đang tô + hình bao đã chạm.
     stroke: Option<(Vec<u8>, PxRect)>,
     last: Option<(f64, f64)>,
-    /// true = cọ thêm vào vùng giữ lại, false = bớt.
-    pub add: bool,
+    pub brush: MaskBrush,
     /// Đường kính cọ, px ảnh.
     pub size: f64,
     /// Độ cứng 0…1 (0 = mép rất mềm).
@@ -75,7 +141,7 @@ impl MaskEdit {
             undo: Vec::new(),
             stroke: None,
             last: None,
-            add: true,
+            brush: MaskBrush::Add,
             size: (matte.w.max(matte.h) as f64 / 25.0)
                 .clamp(10.0, 300.0)
                 .round(),
@@ -101,7 +167,7 @@ impl MaskEdit {
 
     // --- Tô cọ ---------------------------------------------------------------------------
 
-    /// Bắt đầu một nét tại `pt` (px ảnh). `invert` (giữ Alt) = đảo thêm / bớt.
+    /// Bắt đầu một nét tại `pt` (px ảnh). `invert` (giữ Alt) = cọ ngược lại ([`MaskBrush::opposite`]).
     pub fn begin_stroke(&mut self, pt: (f64, f64), invert: bool) {
         self.end_stroke();
         self.stroke = Some((self.full.clone(), (usize::MAX, usize::MAX, 0, 0)));
@@ -113,18 +179,49 @@ impl MaskEdit {
         if self.stroke.is_none() {
             return;
         }
-        let add = self.add != invert;
+        let brush = if invert { self.brush.opposite() } else { self.brush };
         let radius = self.size / 2.0;
-        let bb = brush_line(
-            &mut self.full,
-            self.h,
-            self.w,
-            self.last,
-            pt,
-            radius,
-            self.hardness,
-            add,
-        );
+        let (h, w) = (self.h, self.w);
+        let bb = match brush {
+            MaskBrush::Add | MaskBrush::Subtract => {
+                let add = brush == MaskBrush::Add;
+                let bb = brush_line(&mut self.full, h, w, self.last, pt, radius, self.hardness, add);
+                // Cùng nét ở bản xem trước (toạ độ và bán kính theo tỉ lệ).
+                if !self.preview.is_empty() {
+                    let (kx, ky) = (self.pw as f64 / w as f64, self.ph as f64 / h as f64);
+                    let scale = |p: (f64, f64)| (p.0 * kx, p.1 * ky);
+                    brush_line(
+                        &mut self.preview,
+                        self.ph,
+                        self.pw,
+                        self.last.map(scale),
+                        scale(pt),
+                        radius * kx,
+                        self.hardness,
+                        add,
+                    );
+                }
+                bb
+            }
+            MaskBrush::Push => match self.last {
+                Some(from) => push_line(&mut self.full, h, w, from, pt, radius, self.hardness),
+                None => (0, 0, 0, 0), // chưa có hướng kéo
+            },
+            MaskBrush::Shrink | MaskBrush::Grow => shift_line(
+                &mut self.full,
+                h,
+                w,
+                self.last,
+                pt,
+                radius,
+                self.hardness,
+                brush == MaskBrush::Grow,
+            ),
+        };
+        if !matches!(brush, MaskBrush::Add | MaskBrush::Subtract) {
+            // Đẩy / co / giãn: tính lại phần xem trước từ matte cỡ thật (giống hệt kết quả xuất).
+            self.refresh_preview(bb);
+        }
         if let Some((_, sbb)) = &mut self.stroke {
             if bb.0 < bb.2 && bb.1 < bb.3 {
                 *sbb = (
@@ -135,26 +232,36 @@ impl MaskEdit {
                 );
             }
         }
-        // Cùng nét ở bản xem trước (toạ độ và bán kính theo tỉ lệ).
-        if !self.preview.is_empty() {
-            let (kx, ky) = (
-                self.pw as f64 / self.w as f64,
-                self.ph as f64 / self.h as f64,
-            );
-            let scale = |p: (f64, f64)| (p.0 * kx, p.1 * ky);
-            brush_line(
-                &mut self.preview,
-                self.ph,
-                self.pw,
-                self.last.map(scale),
-                scale(pt),
-                radius * kx,
-                self.hardness,
-                add,
-            );
-        }
         self.last = Some(pt);
         self.invalidate();
+    }
+
+    /// Tính lại bản xem trước trong vùng `(x0, y0, x1, y1)` px cỡ thật bằng trung bình khối.
+    fn refresh_preview(&mut self, (x0, y0, x1, y1): PxRect) {
+        if self.preview.is_empty() || x0 >= x1 || y0 >= y1 {
+            return;
+        }
+        let (kx, ky) = (self.pw as f64 / self.w as f64, self.ph as f64 / self.h as f64);
+        let px0 = ((x0 as f64 * kx).floor() as usize).min(self.pw);
+        let py0 = ((y0 as f64 * ky).floor() as usize).min(self.ph);
+        let px1 = ((x1 as f64 * kx).ceil() as usize).min(self.pw);
+        let py1 = ((y1 as f64 * ky).ceil() as usize).min(self.ph);
+        for py in py0..py1 {
+            let fy0 = ((py as f64 / ky).floor() as usize).min(self.h - 1);
+            let fy1 = (((py + 1) as f64 / ky).ceil() as usize).clamp(fy0 + 1, self.h);
+            for px in px0..px1 {
+                let fx0 = ((px as f64 / kx).floor() as usize).min(self.w - 1);
+                let fx1 = (((px + 1) as f64 / kx).ceil() as usize).clamp(fx0 + 1, self.w);
+                let mut acc = 0u32;
+                for fy in fy0..fy1 {
+                    for fx in fx0..fx1 {
+                        acc += self.full[fy * self.w + fx] as u32;
+                    }
+                }
+                let n = ((fy1 - fy0) * (fx1 - fx0)) as u32;
+                self.preview[py * self.pw + px] = ((acc + n / 2) / n) as u8;
+            }
+        }
     }
 
     /// Kết thúc nét: lưu vùng đã chạm để hoàn tác.
@@ -344,5 +451,34 @@ mod tests {
         let r = result_image(&base, &matte);
         assert_eq!(r.px(1, 1)[3], 255);
         assert_eq!(r.px(1, 6)[3], 0);
+    }
+
+    #[test]
+    fn push_and_shrink_brushes_update_full_and_preview() {
+        let mut e = MaskEdit::new(&half_matte(40, 80), 1);
+        let base = RgbaImage::filled(20, 40, [100, 100, 100, 255]);
+        let _ = e.shown(&base, 1); // bản xem trước 40×20
+        e.size = 16.0;
+        e.brush = MaskBrush::Push;
+        // kéo từ trong (x = 34) ra ngoài (x = 50): viền phình ra quanh y = 20
+        e.begin_stroke((34.0, 20.0), false);
+        e.stroke_to((42.0, 20.0), false);
+        e.stroke_to((50.0, 20.0), false);
+        e.end_stroke();
+        assert!(e.full[20 * 80 + 44] > 200, "{}", e.full[20 * 80 + 44]);
+        assert!(e.preview[10 * 40 + 22] > 150, "xem trước phải theo: {}", e.preview[10 * 40 + 22]);
+        assert_eq!(e.full[2 * 80 + 44], 0, "ngoài cọ không đổi");
+        assert!(e.undo_stroke());
+        assert!(!e.is_modified());
+
+        // Alt với cọ Co = Giãn
+        e.brush = MaskBrush::Shrink;
+        assert_eq!(e.brush.opposite(), MaskBrush::Grow);
+        for _ in 0..6 {
+            e.begin_stroke((40.0, 20.0), true);
+            e.end_stroke();
+        }
+        assert!(e.full[20 * 80 + 41] > 200, "giãn: {}", e.full[20 * 80 + 41]);
+        assert_eq!(MaskBrush::Push.opposite(), MaskBrush::Push);
     }
 }

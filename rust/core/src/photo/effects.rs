@@ -4,7 +4,7 @@
 //! * Các thanh trượt "Adjust" map sang chỉnh sửa kiểu Camera Raw của trình chỉnh nhiều ảnh,
 //!   nên hai trình sửa cho ra cùng một kết quả ([`crate::pipeline::apply_adjustments_u8`]).
 
-use crate::adjustments::{self, ImageU8};
+use crate::adjustments::{self, ImageF32, ImageU8};
 use crate::backend::{self, Plane};
 use crate::photo::RgbaImage;
 use crate::settings::{AdjustmentSettings, SliderSpec};
@@ -372,6 +372,90 @@ pub fn unsharp_mask(img: &RgbaImage, s: &SharpenSettings, scale: f64) -> RgbaIma
     out
 }
 
+// --- Làm nét bằng AI (Real-ESRGAN, xem docs/instruction/sharpen.md) -------------------------
+
+/// Cạnh ô và lề của [`ai_sharpen`]: mỗi ô (≤ 480 px + lề 16 px mỗi bên) phóng ×4 rồi thu lại,
+/// nên bộ nhớ không phụ thuộc cỡ ảnh (~60 MB / ô). Tạo `SuperResolver` với tile ≥ 512 để mỗi ô
+/// chạy model một lần (ô nhỏ hơn thì phần lề chiếm nhiều thời gian hơn).
+pub const AI_SHARPEN_TILE: usize = 480;
+pub const AI_SHARPEN_PAD: usize = 16;
+
+/// Làm nét bằng model siêu phân giải: phóng ×4 bằng `upscaler` (AI dựng lại chi tiết, khử nhiễu)
+/// rồi thu về **đúng cỡ cũ** bằng trung bình khối 4×4 → ảnh rõ nét hơn mà kích thước không đổi.
+/// `strength` 0…1 trộn với ảnh gốc. Alpha giữ nguyên. `progress(0…1)` báo sau mỗi ô; trả về
+/// `false` để huỷ (→ `Err("cancelled")`).
+pub fn ai_sharpen(
+    img: &RgbaImage,
+    upscaler: &dyn crate::pipeline::Upscaler,
+    strength: f32,
+    progress: &mut dyn FnMut(f32) -> bool,
+) -> Result<RgbaImage, String> {
+    const F: usize = 4;
+    let (h, w) = (img.h, img.w);
+    let mut out = img.clone();
+    if img.is_empty() {
+        return Ok(out);
+    }
+    let k = strength.clamp(0.0, 1.0);
+    let (t, pad) = (AI_SHARPEN_TILE, AI_SHARPEN_PAD);
+    let total = h.div_ceil(t) * w.div_ceil(t);
+    let mut done = 0;
+    for y0 in (0..h).step_by(t) {
+        let y1 = (y0 + t).min(h);
+        for x0 in (0..w).step_by(t) {
+            let x1 = (x0 + t).min(w);
+            // ô có lề (kẹp trong ảnh) để mép ô không lộ đường nối
+            let (ex0, ey0) = (x0.saturating_sub(pad), y0.saturating_sub(pad));
+            let (ex1, ey1) = ((x1 + pad).min(w), (y1 + pad).min(h));
+            let (tw, th) = (ex1 - ex0, ey1 - ey0);
+            let mut tile = ImageF32 {
+                h: th,
+                w: tw,
+                data: vec![0.0; th * tw * 3],
+            };
+            for ty in 0..th {
+                for tx in 0..tw {
+                    let si = ((ey0 + ty) * w + ex0 + tx) * 4;
+                    let di = (ty * tw + tx) * 3;
+                    for c in 0..3 {
+                        tile.data[di + c] = img.data[si + c] as f32 / 255.0;
+                    }
+                }
+            }
+            let big = upscaler.upscale(&tile, F as i64)?;
+            if big.h != th * F || big.w != tw * F {
+                return Err(format!("unexpected upscale size {}×{}", big.w, big.h));
+            }
+            // thu về cỡ cũ (trung bình khối 4×4), chỉ phần lõi của ô
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let (bx, by) = ((x - ex0) * F, (y - ey0) * F);
+                    let mut acc = [0f32; 3];
+                    for dy in 0..F {
+                        let row = ((by + dy) * big.w + bx) * 3;
+                        for dx in 0..F {
+                            for (c, a) in acc.iter_mut().enumerate() {
+                                *a += big.data[row + dx * 3 + c];
+                            }
+                        }
+                    }
+                    let i = (y * w + x) * 4;
+                    for (c, a) in acc.iter().enumerate() {
+                        let ai = a / (F * F) as f32 * 255.0;
+                        let src = img.data[i + c] as f32;
+                        out.data[i + c] = (src + k * (ai - src)).round().clamp(0.0, 255.0) as u8;
+                    }
+                }
+            }
+            done += 1;
+            if !progress(done as f32 / total as f32) {
+                return Err("cancelled".to_string());
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// RGBA uint8 → RGBA uint8 đã chỉnh (alpha giữ nguyên).
 ///
 /// `long_side` là cạnh dài của **ảnh gốc** khi `img` là bản xem trước thu nhỏ, để bán kính
@@ -573,5 +657,49 @@ mod tests {
             let key = if spec.key == "sharpness" { "sharpening_amount" } else { spec.key };
             assert!(crate::settings::slider_by_key(key).is_some(), "{} thiếu", spec.key);
         }
+    }
+
+    /// "Model" giả: phóng ×4 bằng lân cận gần nhất, cộng `bias` (để thấy được phần trộn).
+    struct Nearest4 {
+        bias: f32,
+    }
+
+    impl pipeline::Upscaler for Nearest4 {
+        fn upscale(&self, img: &ImageF32, factor: i64) -> Result<ImageF32, String> {
+            let f = factor as usize;
+            let (h, w) = (img.h * f, img.w * f);
+            let mut data = vec![0.0; h * w * 3];
+            for y in 0..h {
+                for x in 0..w {
+                    for c in 0..3 {
+                        data[(y * w + x) * 3 + c] =
+                            (img.data[((y / f) * img.w + x / f) * 3 + c] + self.bias).min(1.0);
+                    }
+                }
+            }
+            Ok(ImageF32 { h, w, data })
+        }
+    }
+
+    #[test]
+    fn ai_sharpen_keeps_size_alpha_and_blends() {
+        // ảnh lớn hơn 1 ô để thử ghép ô
+        let mut img = noise(500, 1000, 7);
+        img.data[3] = 77;
+        let mut calls = 0;
+        let same = ai_sharpen(&img, &Nearest4 { bias: 0.0 }, 1.0, &mut |_| {
+            calls += 1;
+            true
+        })
+        .unwrap();
+        assert_eq!(calls, 2 * 3);
+        assert_eq!(same, img); // phóng lân cận rồi thu trung bình = ảnh cũ
+        let half = ai_sharpen(&img, &Nearest4 { bias: 0.2 }, 0.5, &mut |_| true).unwrap();
+        let p = img.px(450, 990);
+        let q = half.px(450, 990);
+        assert_eq!(q[0], ((p[0] as f32 + 0.5 * ((p[0] as f32 / 255.0 + 0.2).min(1.0) * 255.0 - p[0] as f32)).round()) as u8);
+        assert_eq!(half.px(0, 0)[3], 77);
+        let cancelled = ai_sharpen(&img, &Nearest4 { bias: 0.0 }, 1.0, &mut |_| false);
+        assert!(cancelled.is_err());
     }
 }

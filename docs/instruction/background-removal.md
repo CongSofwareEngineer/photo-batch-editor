@@ -8,7 +8,8 @@
     `flip` giống ảnh nền), `model_input_size` + `preprocess` (đầu vào model), `matte_from_model` (phóng matte
     + guided filter), `CutoutSettings` + `CUTOUT_SLIDERS` (Dịch viền, Làm mềm viền, Khử màu viền),
     `refined_alpha`, `apply_cutout`, `decontaminate`, `Backdrop` (trong suốt / màu / ảnh), `composite_backdrop`,
-    `cover_resize`, `BACKDROP_COLORS` (màu ảnh thẻ), cọ `brush_dab` / `brush_line`, bộ lọc O(n): `box_mean`,
+    `cover_resize`, `BACKDROP_COLORS` (màu ảnh thẻ), cọ `brush_dab` / `brush_line`, `push_dab` / `push_line`
+    (Đẩy viền), `shift_dab` / `shift_line` / `shift_step` (Co / Giãn viền), `dab_weight`, bộ lọc O(n): `box_mean`,
     `min/max_filter`, `guided_filter`.
   - `rust/core/src/bg_remove.rs` (feature `bgremove` của `pbe-core`, kéo `ort` / ONNX Runtime):
     `BackgroundRemover` (nạp model, `matte(img)`), `default_model_path`.
@@ -16,8 +17,8 @@
   - GUI (`pbe-gui` luôn bật `pbe-core/bgremove`): `rust/gui/src/photo/doc.rs` (`Background.cutout`, matte đi
     theo crop / xoay 90° / lật), `render.rs` (áp matte + nền thay thế), `mod.rs` (menu Image › Tách nền, panel
     "Tách nền", thread nền `BgJob`, model dùng chung `REMOVER`, chế độ chỉnh vùng: `mask_controls`,
-    `handle_mask_shortcuts`, `apply_mask_edit`), `mask_edit.rs` (`MaskEdit`: matte đang sửa, undo từng nét, ảnh phủ
-    đỏ / xem kết quả), `render.rs` › `render_mask_base`, `rust/gui/src/fb.rs` (`checker_rect`: ô vuông chỗ trong
+    `handle_mask_shortcuts`, `apply_mask_edit`), `mask_edit.rs` (`MaskEdit` + `MaskBrush`: matte đang sửa, 5 loại
+    cọ, undo từng nét, ảnh phủ đỏ / xem kết quả), `render.rs` › `render_mask_base`, `rust/gui/src/fb.rs` (`checker_rect`: ô vuông chỗ trong
     suốt trên canvas).
 - **Changelog:** [../changelog/background-removal.md](../changelog/background-removal.md)
 
@@ -36,6 +37,15 @@
   xoá phủ **đỏ** (đậm theo `1 − matte`, như Quick Mask) + **đường viền cyan** ở ranh giới matte 50 %; hoặc xem
   "Kết quả" (phần bị xoá thành trong suốt trên ô vuông). Người dùng tô cọ:
   - **+ Thêm vùng** (matte → giữ lại) / **− Bớt vùng** (matte → xoá); giữ **Alt** = cọ ngược lại; **X** đổi.
+  - **Đẩy viền** (`push_line`, như Forward Warp của Liquify nhưng trên matte): nội dung matte quanh con trỏ bị kéo
+    theo hướng di chuột, mạnh nhất ở tâm, giảm dần ra mép cọ → kéo từ trong vùng chọn ra ngoài = vùng chọn phình
+    ra đúng chỗ đó, kéo từ ngoài vào = lõm vào; **chỉ trong phạm vi cọ** (cỡ cọ = độ rộng vùng ảnh hưởng). Mỗi bước
+    ≤ ¼ bán kính; lõi = bán kính × độ cứng × ½ (đẩy luôn cần mép mềm để không xé matte). Alt không đổi gì.
+  - **Co viền / Giãn viền** (`shift_line`): trong phạm vi cọ, viền co lại (min filter) / nở ra (max filter)
+    `shift_step` = 4 % bán kính (≥ 1 px) mỗi chấm, trộn theo độ mềm cọ; tô đi tô lại → viền dịch dần. Alt / X = đổi
+    Co ↔ Giãn.
+  - Đẩy / Co / Giãn sửa matte cỡ thật rồi tính lại phần xem trước trong hình bao đã chạm bằng trung bình khối
+    (`refresh_preview`) → xem trước khớp file xuất. Dấu cạnh vòng cọ: + − ↔ ›‹ ‹›.
   - Cỡ cọ (px ảnh, mặc định cạnh dài / 25, phím **[ ]** ×/÷ 1.2), Độ cứng 0–100 % (lõi đặc = bán kính × độ cứng,
     ra mép mờ dần smoothstep). Nét kéo được nội suy (chấm cách ¼ bán kính) nên không đứt. Vòng tròn cỡ cọ + dấu
     +/− theo con trỏ.
@@ -75,6 +85,8 @@
 - MODNet chuyên cho **chân dung người**; vật thể khác (sản phẩm, thú cưng) có thể tách không chuẩn.
 - Chỉ áp cho ảnh nền, không áp cho layer ảnh chèn.
 - Cọ sửa vùng chưa có "tự bám cạnh" (như Refine Edge của Photoshop) — muốn mép tóc mềm thì dùng độ cứng thấp.
+- Đẩy viền dời cả phần mềm của viền (tóc) theo chuột; đẩy quá xa (> bán kính cọ) mỗi lần sẽ kéo giãn mép — kéo
+  nhiều nhát ngắn.
 - Mỗi nét cọ sao lưu cả matte cỡ thật một lần lúc bắt đầu nét (ảnh 24 MP ≈ 24 MB, giải phóng khi thả chuột).
 - "Ghép áo khác" = chèn PNG áo có nền trong suốt bằng Chèn ảnh; app **không** tự sinh / thay quần áo bằng AI.
 - Chưa có tách nền hàng loạt (tab batch).
@@ -93,10 +105,12 @@
   → `matte.png`, `transparent.png`, `blue.jpg`, `blue_no_decontaminate.jpg`.
 - `rust/gui/tests/cpu_render.rs`: `render_cutout_replaces_background_at_every_scale`,
   `cutout_matte_follows_crop_rotate_flip_and_undo`.
-- `matting.rs`: `brush_adds_and_removes_with_soft_edge`, `brush_line_has_no_gaps`; `rust/gui/src/photo/mask_edit.rs`
-  (`#[cfg(test)]`): tô / Alt / hoàn tác / bỏ nét, bản xem trước theo nét cỡ thật, ảnh phủ đỏ + viền + xem kết quả.
+- `matting.rs`: `brush_adds_and_removes_with_soft_edge`, `brush_line_has_no_gaps`,
+  `push_moves_the_edge_only_under_the_brush`, `shift_shrinks_and_grows_locally`; `rust/gui/src/photo/mask_edit.rs`
+  (`#[cfg(test)]`): tô / Alt / hoàn tác / bỏ nét, bản xem trước theo nét cỡ thật, ảnh phủ đỏ + viền + xem kết quả,
+  `push_and_shrink_brushes_update_full_and_preview`.
 - Thủ công: `cargo run -p pbe-gui` → Sửa ảnh đơn → mở ảnh chân dung → panel "Tách nền" › Tách nền → kiểm tra
-  vùng đỏ + viền, tô Thêm / Bớt (cả Alt, X, [ ]), Ctrl+Z, xem "Kết quả", Áp dụng (Enter) / Huỷ (Esc), "Sửa vùng
+  vùng đỏ + viền, tô Thêm / Bớt (cả Alt, X, [ ]), Đẩy viền (kéo viền ra / vào ở vai, tóc), Co / Giãn viền, Ctrl+Z, xem "Kết quả", Áp dụng (Enter) / Huỷ (Esc), "Sửa vùng
   chọn" sau khi đã tách → thử
   Trong suốt / các màu / màu tuỳ chọn / Ảnh…, kéo Dịch viền / Làm mềm viền, bật tắt Khử màu viền, Ctrl+Z, cắt /
   xoay sau khi tách, xuất PNG (trong suốt) và JPEG (nền màu).

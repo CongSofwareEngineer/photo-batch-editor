@@ -573,6 +573,64 @@ pub fn guided_filter(
 
 // --- Cọ sửa vùng chọn ---------------------------------------------------------------------
 
+/// Trọng số cọ ở khoảng cách `d` tới tâm: 1 trong lõi (`inner`), ra tới mép `r` giảm dần
+/// (smoothstep), 0 ngoài `r`.
+pub fn dab_weight(d: f64, r: f64, inner: f64) -> f64 {
+    if d > r {
+        0.0
+    } else if d <= inner || r - inner < 1e-9 {
+        1.0
+    } else {
+        let t = (r - d) / (r - inner);
+        t * t * (3.0 - 2.0 * t)
+    }
+}
+
+/// Hình bao `(x0, y0, x1, y1)` của chấm tròn tâm `(cx, cy)` bán kính `r` (kẹp vào ảnh) + lề `pad`.
+fn dab_rect(h: usize, w: usize, cx: f64, cy: f64, r: f64, pad: f64) -> (usize, usize, usize, usize) {
+    let r = r + pad;
+    (
+        ((cx - r).floor().max(0.0) as usize).min(w),
+        ((cy - r).floor().max(0.0) as usize).min(h),
+        ((cx + r).ceil().max(0.0) as usize).min(w),
+        ((cy + r).ceil().max(0.0) as usize).min(h),
+    )
+}
+
+fn union_rect(
+    a: (usize, usize, usize, usize),
+    b: (usize, usize, usize, usize),
+) -> (usize, usize, usize, usize) {
+    if b.0 >= b.2 || b.1 >= b.3 {
+        return a;
+    }
+    (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))
+}
+
+/// Đi dọc đoạn `from → to`, mỗi bước ≤ `step` px, gọi `f(điểm trước, điểm mới)`; gộp hình bao.
+fn walk_line(
+    from: (f64, f64),
+    to: (f64, f64),
+    step: f64,
+    mut f: impl FnMut((f64, f64), (f64, f64)) -> (usize, usize, usize, usize),
+) -> (usize, usize, usize, usize) {
+    let len = ((to.0 - from.0).powi(2) + (to.1 - from.1).powi(2)).sqrt();
+    let n = (len / step.max(0.5)).ceil().max(1.0) as usize;
+    let mut bb = (usize::MAX, usize::MAX, 0, 0);
+    let mut prev = from;
+    for i in 1..=n {
+        let t = i as f64 / n as f64;
+        let p = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+        bb = union_rect(bb, f(prev, p));
+        prev = p;
+    }
+    if bb.0 == usize::MAX {
+        (0, 0, 0, 0)
+    } else {
+        bb
+    }
+}
+
 /// Tô một chấm cọ tròn vào matte `h × w` (u8) tại tâm `(cx, cy)` px, bán kính `radius`.
 /// `hardness` 0…1: phần lõi đặc = `radius × hardness`, ra tới mép thì mờ dần (smoothstep).
 /// `add = true`: thêm vào vùng giữ lại (matte → 255); `false`: bớt (matte → 0).
@@ -602,13 +660,7 @@ pub fn brush_dab(
             if d > r {
                 continue;
             }
-            let v = if d <= inner || r - inner < 1e-9 {
-                1.0
-            } else {
-                let t = (r - d) / (r - inner);
-                t * t * (3.0 - 2.0 * t)
-            };
-            let v = (v * 255.0).round() as u8;
+            let v = (dab_weight(d, r, inner) * 255.0).round() as u8;
             let px = &mut data[y * w + x];
             *px = if add {
                 (*px).max(v)
@@ -656,6 +708,152 @@ pub fn brush_line(
         (0, 0, 0, 0)
     } else {
         bb
+    }
+}
+
+/// Cọ **Đẩy viền** (như Forward Warp của Liquify, nhưng trên matte): nội dung matte quanh `to`
+/// bị kéo theo hướng `from → to`, mạnh nhất ở tâm, giảm dần ra mép cọ. Kéo từ trong vùng chọn ra
+/// ngoài → vùng chọn phình ra đúng chỗ đó; kéo từ ngoài vào → vùng chọn lõm vào. Chỉ đổi trong
+/// bán kính cọ. Trả về hình bao đã chạm.
+#[allow(clippy::too_many_arguments)]
+pub fn push_dab(
+    data: &mut [u8],
+    h: usize,
+    w: usize,
+    from: (f64, f64),
+    to: (f64, f64),
+    radius: f64,
+    hardness: f64,
+) -> (usize, usize, usize, usize) {
+    let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist < 1e-6 || h == 0 || w == 0 {
+        return (0, 0, 0, 0);
+    }
+    let r = radius.max(1.0);
+    // Đẩy luôn cần mép mềm để không xé matte; độ cứng chỉ mở rộng phần lõi tới tối đa ½ bán kính.
+    let inner = r * hardness.clamp(0.0, 1.0) * 0.5;
+    let (x0, y0, x1, y1) = dab_rect(h, w, to.0, to.1, r, 0.0);
+    if x0 >= x1 || y0 >= y1 {
+        return (0, 0, 0, 0);
+    }
+    // Bản sao vùng nguồn (vùng cọ + quãng dời) để lấy mẫu song tuyến.
+    let (sx0, sy0, sx1, sy1) = dab_rect(h, w, to.0, to.1, r, dist + 2.0);
+    let sw = sx1 - sx0;
+    let mut src = Vec::with_capacity(sw * (sy1 - sy0));
+    for y in sy0..sy1 {
+        src.extend_from_slice(&data[y * w + sx0..y * w + sx1]);
+    }
+    let sample = |fx: f64, fy: f64| -> f64 {
+        let fx = (fx - 0.5).clamp(sx0 as f64, (sx1 - 1) as f64) - sx0 as f64;
+        let fy = (fy - 0.5).clamp(sy0 as f64, (sy1 - 1) as f64) - sy0 as f64;
+        let (ax, ay) = (fx.floor() as usize, fy.floor() as usize);
+        let (bx, by) = ((ax + 1).min(sw - 1), (ay + 1).min(sy1 - sy0 - 1));
+        let (tx, ty) = (fx - ax as f64, fy - ay as f64);
+        let v = |x: usize, y: usize| src[y * sw + x] as f64;
+        let top = v(ax, ay) * (1.0 - tx) + v(bx, ay) * tx;
+        let bot = v(ax, by) * (1.0 - tx) + v(bx, by) * tx;
+        top * (1.0 - ty) + bot * ty
+    };
+    for y in y0..y1 {
+        let py = y as f64 + 0.5;
+        for x in x0..x1 {
+            let px = x as f64 + 0.5;
+            let d = ((px - to.0).powi(2) + (py - to.1).powi(2)).sqrt();
+            let k = dab_weight(d, r, inner);
+            if k <= 0.0 {
+                continue;
+            }
+            data[y * w + x] = sample(px - dx * k, py - dy * k).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    (x0, y0, x1, y1)
+}
+
+/// Nét Đẩy viền từ `from` tới `to`, chia bước ≤ ¼ bán kính để kéo nhanh vẫn mượt.
+pub fn push_line(
+    data: &mut [u8],
+    h: usize,
+    w: usize,
+    from: (f64, f64),
+    to: (f64, f64),
+    radius: f64,
+    hardness: f64,
+) -> (usize, usize, usize, usize) {
+    walk_line(from, to, radius * 0.25, |a, b| push_dab(data, h, w, a, b, radius, hardness))
+}
+
+/// Số px viền dịch mỗi chấm của cọ Co / Giãn (≈ 4 % bán kính, tối thiểu 1 px).
+pub fn shift_step(radius: f64) -> usize {
+    ((radius * 0.04).round() as usize).max(1)
+}
+
+/// Cọ **Co / Giãn viền** cục bộ: trong bán kính cọ, viền vùng chọn co lại (`grow = false`, min
+/// filter) hoặc nở ra (`grow = true`, max filter) `step` px, trộn theo độ mềm của cọ. Tô đi tô lại
+/// nhiều lần → viền dịch dần. Trả về hình bao đã chạm.
+#[allow(clippy::too_many_arguments)]
+pub fn shift_dab(
+    data: &mut [u8],
+    h: usize,
+    w: usize,
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    hardness: f64,
+    grow: bool,
+    step: usize,
+) -> (usize, usize, usize, usize) {
+    let r = radius.max(1.0);
+    let inner = r * hardness.clamp(0.0, 1.0);
+    let (x0, y0, x1, y1) = dab_rect(h, w, cx, cy, r, 0.0);
+    if x0 >= x1 || y0 >= y1 {
+        return (0, 0, 0, 0);
+    }
+    let (sx0, sy0, sx1, sy1) = dab_rect(h, w, cx, cy, r, step as f64 + 1.0);
+    let (sw, sh) = (sx1 - sx0, sy1 - sy0);
+    let mut region = Vec::with_capacity(sw * sh);
+    for y in sy0..sy1 {
+        region.extend(data[y * w + sx0..y * w + sx1].iter().map(|&v| v as f32));
+    }
+    let filtered = if grow {
+        max_filter(&region, sh, sw, step)
+    } else {
+        min_filter(&region, sh, sw, step)
+    };
+    for y in y0..y1 {
+        let dy = y as f64 + 0.5 - cy;
+        for x in x0..x1 {
+            let dx = x as f64 + 0.5 - cx;
+            let k = dab_weight((dx * dx + dy * dy).sqrt(), r, inner) as f32;
+            if k <= 0.0 {
+                continue;
+            }
+            let i = (y - sy0) * sw + (x - sx0);
+            let v = region[i] + k * (filtered[i] - region[i]);
+            data[y * w + x] = v.round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    (x0, y0, x1, y1)
+}
+
+/// Nét Co / Giãn từ `from` (None = một chấm) tới `to`, chấm cách nhau ¼ bán kính.
+#[allow(clippy::too_many_arguments)]
+pub fn shift_line(
+    data: &mut [u8],
+    h: usize,
+    w: usize,
+    from: Option<(f64, f64)>,
+    to: (f64, f64),
+    radius: f64,
+    hardness: f64,
+    grow: bool,
+) -> (usize, usize, usize, usize) {
+    let step = shift_step(radius);
+    match from {
+        None => shift_dab(data, h, w, to.0, to.1, radius, hardness, grow, step),
+        Some(f) => walk_line(f, to, radius * 0.25, |_, b| {
+            shift_dab(data, h, w, b.0, b.1, radius, hardness, grow, step)
+        }),
     }
 }
 
@@ -913,5 +1111,45 @@ mod tests {
         let bb = brush_line(&mut m, h, w, None, (50.0, 5.0), 2.0, 1.0, false);
         assert_eq!(m[5 * w + 50], 0);
         assert!(bb.0 <= 50 && bb.2 > 50);
+    }
+
+    /// Nửa trái = vùng chọn (255), nửa phải = nền (0).
+    fn half(h: usize, w: usize) -> Vec<u8> {
+        (0..h * w).map(|i| if i % w < w / 2 { 255 } else { 0 }).collect()
+    }
+
+    #[test]
+    fn push_moves_the_edge_only_under_the_brush() {
+        let (h, w) = (40, 60);
+        let mut m = half(h, w);
+        // kéo từ trong vùng chọn (x = 25) ra ngoài (x = 35) quanh y = 20
+        let bb = push_line(&mut m, h, w, (25.0, 20.0), (35.0, 20.0), 8.0, 0.5);
+        assert!(bb.0 < bb.2);
+        assert!(m[20 * w + 33] > 200, "viền phải phình ra: {}", m[20 * w + 33]);
+        // ngoài bán kính cọ không đổi
+        assert_eq!(m[2 * w + 33], 0);
+        assert_eq!(m[38 * w + 33], 0);
+        // kéo ngược vào → lõm vào
+        let mut m2 = half(h, w);
+        push_line(&mut m2, h, w, (35.0, 20.0), (25.0, 20.0), 8.0, 0.5);
+        assert!(m2[20 * w + 27] < 60, "viền phải lõm vào: {}", m2[20 * w + 27]);
+        assert_eq!(m2[2 * w + 27], 255);
+    }
+
+    #[test]
+    fn shift_shrinks_and_grows_locally() {
+        let (h, w) = (40, 60);
+        let mut m = half(h, w);
+        for _ in 0..4 {
+            shift_line(&mut m, h, w, None, (30.0, 20.0), 6.0, 1.0, false);
+        }
+        assert!(m[20 * w + 28] < 50, "co: {}", m[20 * w + 28]);
+        assert_eq!(m[5 * w + 28], 255); // ngoài cọ giữ nguyên
+        let mut g = half(h, w);
+        for _ in 0..4 {
+            shift_line(&mut g, h, w, None, (30.0, 20.0), 6.0, 1.0, true);
+        }
+        assert!(g[20 * w + 31] > 200, "giãn: {}", g[20 * w + 31]);
+        assert_eq!(g[5 * w + 31], 0);
     }
 }

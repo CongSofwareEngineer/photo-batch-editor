@@ -16,8 +16,8 @@ path = "src/main.rs"
 [dependencies]
 eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
 egui = "0.36.2"
-# `bgremove`: tách nền bằng AI (MODNet qua ONNX Runtime) trong Sửa ảnh đơn.
-pbe-core = { path = "../core", features = ["bgremove"] }
+# `bgremove`: tách nền bằng AI (MODNet qua ONNX Runtime); `sr`: "Làm nét bằng AI" (Real-ESRGAN) trong Sửa ảnh đơn.
+pbe-core = { path = "../core", features = ["bgremove", "sr"] }
 rfd = "0.17.2"
 serde_json = "1"
 

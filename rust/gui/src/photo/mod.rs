@@ -1,6 +1,6 @@
 //! Trình sửa một ảnh — bố cục kiểu Photoshop: thanh menu + thanh tuỳ chọn công cụ ở trên,
-//! thanh công cụ dọc bên trái, canvas ở giữa, panel (Properties / Adjust / Sharpen / Layers)
-//! bên phải, thanh trạng thái ở dưới. Port của `ui/photo/photo_editor_view.py`,
+//! thanh công cụ dọc bên trái, canvas ở giữa, panel (Properties / Adjust / Skin / Sharpen /
+//! Layers) bên phải, thanh trạng thái ở dưới. Port của `ui/photo/photo_editor_view.py`,
 //! `ui/photo/canvas.py`, `ui/photo/tools.py`, `ui/photo/panels.py`.
 
 pub mod collage;
@@ -8,13 +8,16 @@ pub mod doc;
 pub mod mask_edit;
 pub mod render;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 use egui::{Color32, Key, Pos2, RichText, Stroke, Ui};
 use pbe_core::bg_remove::BackgroundRemover;
+use pbe_core::enhance::SuperResolver;
 use pbe_core::photo::effects::{
-    PhotoAdjust, SharpenSettings, ADJUST_SLIDERS, BLUR_MODES, SHARPEN_SLIDERS,
+    ai_sharpen, PhotoAdjust, SharpenSettings, ADJUST_SLIDERS, BLUR_MODES, SHARPEN_SLIDERS,
 };
 use pbe_core::photo::geometry::{
     clamp_zoom, crop_rect, crop_ratio, fit_scale, next_zoom, round_rect, zoom_at, CROP_RATIOS,
@@ -22,6 +25,7 @@ use pbe_core::photo::geometry::{
 };
 use pbe_core::photo::image_io::{default_export_path, load_rgba, save_image, OPEN_FILTER_EXTS};
 use pbe_core::photo::matting::{Backdrop, Cutout, Matte, BACKDROP_COLORS, CUTOUT_SLIDERS};
+use pbe_core::photo::skin::{SkinSmoothSettings, SKIN_SLIDERS};
 use pbe_core::photo::RgbaImage;
 use pbe_core::settings::SliderSpec;
 
@@ -30,14 +34,16 @@ use crate::preview::PREVIEW_LONG_SIDE;
 use crate::theme;
 use crate::tr;
 use crate::widgets;
-use doc::{Document, Layer};
-use mask_edit::{MaskEdit, MaskView};
+use doc::{CloneStroke, Document, Layer, BACKGROUND_ID};
+use mask_edit::{MaskBrush, MaskEdit, MaskView};
+use render::BaseCache;
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum Tool {
     Move,
     Crop,
     Blur,
+    Clone,
     Hand,
     Zoom,
 }
@@ -51,11 +57,12 @@ enum ToolButton {
 }
 
 /// Thanh công cụ dọc: (nút, nhãn, phím tắt). `None` = vạch ngăn nhóm.
-const TOOLBAR: [Option<(ToolButton, &str, Key)>; 9] = [
+const TOOLBAR: [Option<(ToolButton, &str, Key)>; 10] = [
     Some((ToolButton::Tool(Tool::Move), "Move tool", Key::V)),
     Some((ToolButton::Tool(Tool::Crop), "Crop tool", Key::C)),
     None,
     Some((ToolButton::Tool(Tool::Blur), "Blur tool", Key::B)),
+    Some((ToolButton::Tool(Tool::Clone), "Clone stamp tool", Key::S)),
     Some((ToolButton::InsertImage, "Insert image", Key::I)),
     Some((ToolButton::Collage, "Collage", Key::L)),
     None,
@@ -108,6 +115,34 @@ struct BgJob {
     size: (usize, usize),
 }
 
+/// Làm nét bằng AI đang chạy ở thread nền (Real-ESRGAN, vài giây tới vài chục giây).
+struct SrJob {
+    rx: mpsc::Receiver<SrMsg>,
+    progress: f32,
+    cancel: Arc<AtomicBool>,
+    doc_serial: u64,
+    size: (usize, usize),
+}
+
+enum SrMsg {
+    Progress(f32),
+    Done(Result<RgbaImage, String>),
+}
+
+/// Model Super Resolution nạp một lần (dùng cho "Làm nét bằng AI").
+static RESOLVER: Mutex<Option<Arc<SuperResolver>>> = Mutex::new(None);
+
+fn super_resolver() -> Result<Arc<SuperResolver>, String> {
+    let mut slot = RESOLVER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(r) = slot.as_ref() {
+        return Ok(r.clone());
+    }
+    // tile 512: mỗi ô của ai_sharpen (480 + lề) chạy model một lần
+    let r = Arc::new(SuperResolver::new(None, Some(512))?);
+    *slot = Some(r.clone());
+    Ok(r)
+}
+
 /// Model tách nền nạp một lần, dùng chung cho mọi lần chạy.
 static REMOVER: Mutex<Option<Arc<BackgroundRemover>>> = Mutex::new(None);
 
@@ -153,6 +188,23 @@ pub struct PhotoEditorView {
     mask_base_rev: u64,
     /// Tăng mỗi lần mở tài liệu khác (để nhận ra kết quả tách nền của ảnh cũ).
     doc_serial: u64,
+    /// Ảnh nền đã chỉnh (Adjust / mịn da / Unsharp) cỡ xem trước — không tính lại khi chỉ đổi layer.
+    base_cache: BaseCache,
+    /// Tem nhân bản: điểm mẫu (Alt + bấm), độ lệch nguồn − đích, layer đang tô, tuỳ chọn cọ.
+    clone_source: Option<(f64, f64)>,
+    clone_offset: Option<(f64, f64)>,
+    clone_painting: Option<u64>,
+    clone_size: f64,
+    clone_hardness: f64,
+    clone_opacity: f32,
+    clone_aligned: bool,
+    sr_job: Option<SrJob>,
+    /// Độ mạnh "Làm nét bằng AI" 0…100 %.
+    ai_strength: f64,
+    /// Ảnh thu nhỏ trong bảng Layer: id → (con trỏ `Arc` ảnh nguồn, texture).
+    thumbs: HashMap<u64, (usize, egui::TextureHandle)>,
+    /// Đang đổi tên layer: (id, tên đang gõ).
+    renaming: Option<(u64, String)>,
 }
 
 impl Default for PhotoEditorView {
@@ -185,6 +237,18 @@ impl Default for PhotoEditorView {
             mask_base: None,
             mask_base_rev: 0,
             doc_serial: 0,
+            base_cache: BaseCache::default(),
+            clone_source: None,
+            clone_offset: None,
+            clone_painting: None,
+            clone_size: 60.0,
+            clone_hardness: 0.5,
+            clone_opacity: 1.0,
+            clone_aligned: true,
+            sr_job: None,
+            ai_strength: 100.0,
+            thumbs: HashMap::new(),
+            renaming: None,
         }
     }
 }
@@ -219,6 +283,12 @@ impl PhotoEditorView {
         self.tool = Tool::Move;
         self.error = None;
         self.info = None;
+        self.base_cache = BaseCache::default();
+        self.clone_source = None;
+        self.clone_offset = None;
+        self.clone_painting = None;
+        self.thumbs.clear();
+        self.renaming = None;
     }
 
     fn choose_and_open(&mut self) {
@@ -238,6 +308,16 @@ impl PhotoEditorView {
         self.tool = tool;
         self.crop_pending = None;
         self.drag = None;
+        self.clone_painting = None;
+        if tool == Tool::Clone {
+            if let Some(d) = &self.doc {
+                // cọ mặc định ≈ 1/20 cạnh dài ảnh
+                let long = d.size().0.max(d.size().1) as f64;
+                if self.clone_source.is_none() {
+                    self.clone_size = (long / 20.0).clamp(10.0, 400.0).round();
+                }
+            }
+        }
     }
 
     fn press_tool_button(&mut self, button: ToolButton) {
@@ -252,6 +332,7 @@ impl PhotoEditorView {
 
     pub fn ui(&mut self, ui: &mut Ui) {
         self.poll_bg_job(ui.ctx());
+        self.poll_sr_job(ui.ctx());
         self.check_mask_edit();
         self.ui_menu_bar(ui);
         self.ui_options_bar(ui);
@@ -292,7 +373,56 @@ impl PhotoEditorView {
             }
             self.set_document(Document::new_untitled(img, "collage"));
         }
+        self.handle_dropped_files(ui);
         self.handle_shortcuts(ui);
+    }
+
+    /// Kéo thả file ảnh từ Finder / Explorer: chưa mở ảnh → file đầu mở làm nền, các file còn lại
+    /// chèn thành layer; đã mở ảnh → tất cả chèn thành layer (như Photoshop "Place").
+    fn handle_dropped_files(&mut self, ui: &mut Ui) {
+        if self.collage.open || self.mask_edit.is_some() {
+            return;
+        }
+        let (hovering, dropped) = ui.input(|i| {
+            (
+                !i.raw.hovered_files.is_empty(),
+                i.raw
+                    .dropped_files
+                    .iter()
+                    .map(|f| f.path().to_path_buf())
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .collect::<Vec<PathBuf>>(),
+            )
+        });
+        if hovering {
+            let rect = ui.ctx().content_rect();
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("photo_drop_hint"),
+            ));
+            painter.rect_filled(rect, 0.0, Color32::from_black_alpha(140));
+            let hint = if self.doc.is_some() {
+                tr("Drop to insert as layers")
+            } else {
+                tr("Drop to open")
+            };
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                hint,
+                egui::FontId::proportional(22.0),
+                Color32::WHITE,
+            );
+        }
+        if dropped.is_empty() {
+            return;
+        }
+        let mut paths = dropped.as_slice();
+        if self.doc.is_none() {
+            self.open_path(&paths[0]);
+            paths = &paths[1..];
+        }
+        self.insert_paths(paths);
     }
 
     /// Thanh menu kiểu Photoshop: File / Edit / Image / View + Xuất, Hoàn tác ở bên phải.
@@ -346,6 +476,12 @@ impl PhotoEditorView {
                                 d.delete_selected();
                             }
                         }
+                        ui.separator();
+                        if let Some(d) = &mut self.doc {
+                            if !editing {
+                                arrange_menu(ui, d);
+                            }
+                        }
                     });
                     ui.menu_button(tr("Image"), |ui| {
                         if menu_item(ui, &tr("Rotate 90° left"), "", geo) {
@@ -374,6 +510,14 @@ impl PhotoEditorView {
                         }
                         if menu_item(ui, &tr("Remove background"), "", geo && self.bg_job.is_none()) {
                             self.start_remove_background(ui.ctx());
+                        }
+                        if menu_item(
+                            ui,
+                            &tr("AI sharpen"),
+                            "",
+                            geo && self.sr_job.is_none(),
+                        ) {
+                            self.start_ai_sharpen(ui.ctx());
                         }
                         if menu_item(ui, &tr("Reset adjustments"), "", has) {
                             self.reset_adjustments();
@@ -448,6 +592,7 @@ impl PhotoEditorView {
                         Tool::Move => self.ui_move_options(ui, has),
                         Tool::Crop => self.ui_crop_options(ui),
                         Tool::Blur => self.ui_blur_options(ui),
+                        Tool::Clone => self.ui_clone_options(ui),
                         Tool::Hand | Tool::Zoom => {
                             if self.tool == Tool::Zoom {
                                 if widgets::secondary(ui, "+", has).clicked() {
@@ -546,6 +691,54 @@ impl PhotoEditorView {
         widgets::subtitle(ui, &tr("Drag on the photo to blur an area"));
     }
 
+    /// Tuỳ chọn Tem nhân bản: cỡ cọ, độ cứng, độ đậm, căn chỉnh (xem clone-stamp.md).
+    fn ui_clone_options(&mut self, ui: &mut Ui) {
+        let max = self
+            .doc
+            .as_ref()
+            .map(|d| (d.size().0.max(d.size().1) as f64 / 2.0).max(50.0))
+            .unwrap_or(500.0);
+        ui.add(
+            egui::Slider::new(&mut self.clone_size, 2.0..=max)
+                .logarithmic(true)
+                .step_by(1.0)
+                .suffix(" px")
+                .text(tr("Brush size")),
+        );
+        let mut hardness = self.clone_hardness * 100.0;
+        if ui
+            .add(
+                egui::Slider::new(&mut hardness, 0.0..=100.0)
+                    .step_by(1.0)
+                    .suffix(" %")
+                    .text(tr("Hardness")),
+            )
+            .changed()
+        {
+            self.clone_hardness = hardness / 100.0;
+        }
+        let mut opacity = self.clone_opacity * 100.0;
+        if ui
+            .add(
+                egui::Slider::new(&mut opacity, 1.0..=100.0)
+                    .step_by(1.0)
+                    .suffix(" %")
+                    .text(tr("Opacity")),
+            )
+            .changed()
+        {
+            self.clone_opacity = opacity / 100.0;
+        }
+        ui.checkbox(&mut self.clone_aligned, tr("Aligned"))
+            .on_hover_text(tr("On: the sample point moves with the brush between strokes. Off: every stroke starts again from the sample point."));
+        let hint = if self.clone_source.is_some() {
+            tr("Paint to copy the sample · Alt + click = new sample point · [ ] = brush size")
+        } else {
+            tr("Alt + click on the photo to pick the sample area")
+        };
+        widgets::subtitle(ui, &hint);
+    }
+
     /// Thanh công cụ dọc bên trái (như Photoshop).
     fn ui_toolbox(&mut self, ui: &mut Ui) {
         let has = self.doc.is_some();
@@ -612,11 +805,20 @@ impl PhotoEditorView {
                         );
                     }
                     let busy = self.bg_job.is_some();
+                    let sr = self.sr_job.as_ref().map(|j| j.progress);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(text(format!("{} {}", doc.state.layers.len(), tr("layers"))).color(theme::TEXT_FAINT));
                         if busy {
                             ui.separator();
                             ui.label(text(tr("Removing background…")).color(theme::CYAN));
+                            ui.spinner();
+                        }
+                        if let Some(p) = sr {
+                            ui.separator();
+                            ui.label(
+                                text(format!("{} {:.0}%", tr("AI sharpening…"), p * 100.0))
+                                    .color(theme::CYAN),
+                            );
                             ui.spinner();
                         }
                     });
@@ -636,6 +838,8 @@ impl PhotoEditorView {
                     self.ui_cutout_panel(ui);
                     ui.add_space(6.0);
                     self.ui_adjust_panel(ui);
+                    ui.add_space(6.0);
+                    self.ui_skin_panel(ui);
                     ui.add_space(6.0);
                     self.ui_sharpen_panel(ui);
                     ui.add_space(6.0);
@@ -712,6 +916,180 @@ impl PhotoEditorView {
             });
             widgets::subtitle(ui, &tr("Threshold keeps smooth areas (skin, sky) from getting grainy."));
         });
+        self.ui_ai_sharpen(ui);
+    }
+
+    /// "Làm nét bằng AI": Real-ESRGAN dựng lại chi tiết rồi thu về đúng cỡ ảnh (xem sharpen.md).
+    fn ui_ai_sharpen(&mut self, ui: &mut Ui) {
+        let running = self.sr_job.as_ref().map(|j| j.progress);
+        let mut start = false;
+        let mut cancel = false;
+        let editing = self.mask_edit.is_some();
+        widgets::section(ui, &tr("AI sharpen"), true, |ui| {
+            widgets::subtitle(
+                ui,
+                &tr("AI rebuilds fine detail (good for soft or slightly blurry photos). The photo size stays the same."),
+            );
+            if let Some(d) = &self.doc {
+                let mp = (d.size().0 * d.size().1) as f64 / 1e6;
+                widgets::subtitle(
+                    ui,
+                    &tr("About {0} s for this photo ({1} MP).")
+                        .replace("{0}", &format!("{:.0}", (mp * 10.0).max(1.0)))
+                        .replace("{1}", &format!("{mp:.1}")),
+                );
+            }
+            ui.add(
+                egui::Slider::new(&mut self.ai_strength, 10.0..=100.0)
+                    .step_by(1.0)
+                    .suffix(" %")
+                    .text(tr("AI strength")),
+            );
+            ui.horizontal(|ui| match running {
+                Some(p) => {
+                    widgets::progress_bar(ui, p, &format!("{:.0}%", p * 100.0));
+                    if widgets::secondary(ui, &tr("Cancel"), true).clicked() {
+                        cancel = true;
+                    }
+                }
+                None => {
+                    if widgets::primary(ui, &tr("AI sharpen"), !editing).clicked() {
+                        start = true;
+                    }
+                }
+            });
+        });
+        if start {
+            self.start_ai_sharpen(ui.ctx());
+        }
+        if cancel {
+            if let Some(j) = &self.sr_job {
+                j.cancel.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Chạy "Làm nét bằng AI" ở thread nền; kết quả nhận trong [`Self::poll_sr_job`].
+    fn start_ai_sharpen(&mut self, ctx: &egui::Context) {
+        if self.sr_job.is_some() {
+            return;
+        }
+        let Some(doc) = &self.doc else { return };
+        let img = doc.state.background.img.clone();
+        let size = doc.size();
+        let strength = (self.ai_strength / 100.0) as f32;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        let stop = cancel.clone();
+        std::thread::spawn(move || {
+            let result = super_resolver().and_then(|r| {
+                let mut last = 0.0f32;
+                ai_sharpen(&img, r.as_ref(), strength, &mut |p| {
+                    if p - last >= 0.01 || p >= 1.0 {
+                        last = p;
+                        let _ = tx.send(SrMsg::Progress(p));
+                        ctx.request_repaint();
+                    }
+                    !stop.load(Ordering::Relaxed)
+                })
+            });
+            let _ = tx.send(SrMsg::Done(result));
+            ctx.request_repaint();
+        });
+        self.error = None;
+        self.sr_job = Some(SrJob {
+            rx,
+            progress: 0.0,
+            cancel,
+            doc_serial: self.doc_serial,
+            size,
+        });
+    }
+
+    fn poll_sr_job(&mut self, ctx: &egui::Context) {
+        let Some(job) = &mut self.sr_job else { return };
+        let mut done = None;
+        loop {
+            match job.rx.try_recv() {
+                Ok(SrMsg::Progress(p)) => job.progress = p,
+                Ok(SrMsg::Done(r)) => {
+                    done = Some(r);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    done = Some(Err("AI thread stopped".to_string()));
+                    break;
+                }
+            }
+        }
+        let Some(result) = done else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            return;
+        };
+        let (serial, size, cancelled) =
+            (job.doc_serial, job.size, job.cancel.load(Ordering::Relaxed));
+        self.sr_job = None;
+        match result {
+            Ok(img) => {
+                let Some(doc) = &mut self.doc else { return };
+                if serial != self.doc_serial || doc.size() != size {
+                    self.error = Some(tr("The photo changed while sharpening. Please try again."));
+                    return;
+                }
+                doc.push_undo("AI sharpen", None);
+                doc.state.background.img = Arc::new(img);
+                self.info = Some(tr("AI sharpen applied (Ctrl+Z to undo)."));
+            }
+            Err(_) if cancelled => {}
+            Err(e) => self.error = Some(format!("{}: {e}", tr("AI sharpen failed"))),
+        }
+    }
+
+    /// Mục "Làm mịn da" (xem skin-smoothing.md).
+    fn ui_skin_panel(&mut self, ui: &mut Ui) {
+        let Some(doc) = &mut self.doc else { return };
+        widgets::section(ui, &tr("Skin smoothing"), true, |ui| {
+            let mut skin = doc.state.background.skin;
+            for spec in SKIN_SLIDERS.iter() {
+                let mut v = skin.get(spec.key).unwrap_or(spec.default);
+                if widgets::slider_row(ui, spec, &tr(spec.label), &mut v) {
+                    skin.set(spec.key, v);
+                }
+            }
+            ui.checkbox(&mut skin.skin_only, tr("Skin areas only"))
+                .on_hover_text(tr("Off = smooth the whole photo"));
+            if skin != doc.state.background.skin {
+                doc.push_undo("Skin smoothing", Some("background_skin"));
+                doc.state.background.skin = skin;
+            }
+            ui.horizontal(|ui| {
+                for (label, amount, radius, detail) in [
+                    ("Light", 35.0, 6.0, 45.0),
+                    ("Medium", 60.0, 8.0, 30.0),
+                    ("Strong", 85.0, 12.0, 20.0),
+                ] {
+                    if widgets::secondary(ui, &tr(label), true).clicked() {
+                        doc.push_undo("Skin smoothing", None);
+                        doc.state.background.skin = SkinSmoothSettings {
+                            amount,
+                            radius,
+                            detail,
+                            skin_only: skin.skin_only,
+                        };
+                    }
+                }
+                if widgets::secondary(ui, &tr("Reset"), !skin.is_default()).clicked() {
+                    doc.push_undo("Skin smoothing", None);
+                    doc.state.background.skin = SkinSmoothSettings::default();
+                }
+            });
+            widgets::subtitle(
+                ui,
+                &tr("Smooths blemishes while keeping eyes, hair and edges sharp."),
+            );
+        });
     }
 
     /// Mục "Tách nền": chạy AI, chọn nền mới (trong suốt / màu ảnh thẻ / ảnh), tinh chỉnh viền.
@@ -727,6 +1105,10 @@ impl PhotoEditorView {
                 widgets::subtitle(
                     ui,
                     &tr("Alt + paint = opposite brush · [ ] = brush size · X = switch Add / Subtract"),
+                );
+                widgets::subtitle(
+                    ui,
+                    &tr("Push edge: drag from inside out to grow the selection there, from outside in to shrink it."),
                 );
             });
             self.run_mask_action(action);
@@ -989,6 +1371,22 @@ impl PhotoEditorView {
     fn ui_properties_panel(&mut self, ui: &mut Ui) {
         let Some(doc) = &mut self.doc else { return };
         widgets::section(ui, &tr("Properties"), true, |ui| {
+            if doc.selected == Some(BACKGROUND_ID) {
+                // Nền: độ trong suốt có tác dụng khi nền nằm trên layer khác.
+                let mut opacity = doc.state.background.opacity;
+                if ui
+                    .add(egui::Slider::new(&mut opacity, 0.0..=1.0).text(tr("Opacity")))
+                    .changed()
+                {
+                    doc.push_undo("Opacity", Some("background_opacity"));
+                    doc.state.background.opacity = opacity;
+                }
+                widgets::subtitle(
+                    ui,
+                    &tr("Use ▲ ▼ in Layers to put the background above or below other layers."),
+                );
+                return;
+            }
             let Some(layer) = doc.selected_layer().cloned() else {
                 widgets::subtitle(ui, &tr("No layer selected"));
                 return;
@@ -1028,43 +1426,116 @@ impl PhotoEditorView {
 
     fn ui_layers_panel(&mut self, ui: &mut Ui) {
         let Some(doc) = &mut self.doc else { return };
-        widgets::section(ui, &tr("Layers"), true, |ui| {
+        let thumbs = &mut self.thumbs;
+        let renaming = &mut self.renaming;
+        let title = format!("{} ({})", tr("Layers"), doc.state.layers.len() + 1);
+        widgets::section(ui, &title, true, |ui| {
             let mut toggle: Option<u64> = None;
             let mut select: Option<u64> = None;
-            for layer in doc.state.layers.iter().rev() {
-                ui.horizontal(|ui| {
+            let mut drop: Option<(u64, usize)> = None;
+            let ids = doc.state.stack_ids();
+            // Trên → dưới như Photoshop; "Nền" nằm đúng vị trí của nó, kéo thả để đổi thứ tự.
+            for (pos, &id) in ids.iter().enumerate().rev() {
+                let (visible, name, thumb) = if id == BACKGROUND_ID {
+                    let img = &doc.state.background.img;
+                    let tex = layer_thumb(thumbs, ui.ctx(), id, img);
+                    (doc.state.background.visible, tr("Background"), Thumb::Image(tex))
+                } else {
+                    let Some(l) = doc.state.layers.iter().find(|l| l.id() == id) else {
+                        continue;
+                    };
+                    let name = if l.name().is_empty() {
+                        tr(l.kind())
+                    } else {
+                        l.name().to_string()
+                    };
+                    let thumb = match l {
+                        Layer::Image(il) => Thumb::Image(layer_thumb(thumbs, ui.ctx(), id, &il.img)),
+                        Layer::Blur(_) => Thumb::Icon(ToolButton::Tool(Tool::Blur)),
+                        Layer::Clone(_) => Thumb::Icon(ToolButton::Tool(Tool::Clone)),
+                    };
+                    (l.visible(), name, thumb)
+                };
+                let row = ui.horizontal(|ui| {
                     if ui
-                        .selectable_label(layer.visible(), if layer.visible() { "👁" } else { "–" })
+                        .selectable_label(visible, if visible { "👁" } else { "–" })
                         .clicked()
                     {
-                        toggle = Some(layer.id());
+                        toggle = Some(id);
                     }
-                    let selected = doc.selected == Some(layer.id());
-                    let name = if layer.name().is_empty() {
-                        tr(layer.kind())
+                    // ảnh thu nhỏ trên nền ô vuông (thấy được chỗ trong suốt)
+                    let (r, _) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::hover());
+                    let p = ui.painter();
+                    p.rect_filled(r, 3.0, Color32::from_gray(60));
+                    match thumb {
+                        Thumb::Image(tex) => {
+                            let size = tex.size_vec2();
+                            let k = (r.width() / size.x).min(r.height() / size.y);
+                            let ir = egui::Rect::from_center_size(r.center(), size * k);
+                            p.rect_filled(ir, 0.0, Color32::from_gray(200));
+                            p.image(tex.id(), ir, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                        }
+                        Thumb::Icon(b) => paint_icon(p, r.shrink(7.0), b, theme::TEXT_DIM),
+                    }
+                    let selected = doc.selected == Some(id);
+                    if let Some((rid, text)) = renaming.as_mut().filter(|(rid, _)| *rid == id) {
+                        let _ = rid;
+                        let edit = ui.add(egui::TextEdit::singleline(text).desired_width(140.0));
+                        edit.request_focus();
+                        let (enter, esc) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+                        if esc {
+                            *renaming = None;
+                        } else if enter || edit.lost_focus() {
+                            let new_name = text.clone();
+                            *renaming = None;
+                            doc.rename_layer(id, &new_name);
+                        }
+                        return;
+                    }
+                    let plain = name.clone();
+                    let text = if id == BACKGROUND_ID {
+                        RichText::new(name).italics()
                     } else {
-                        layer.name().to_string()
+                        RichText::new(name)
                     };
-                    if ui.selectable_label(selected, name).clicked() {
-                        select = Some(layer.id());
+                    let resp = ui
+                        .add(egui::Button::selectable(selected, text).sense(egui::Sense::click_and_drag()))
+                        .on_hover_text(tr("Drag to change the order · double-click to rename"));
+                    if resp.clicked() || resp.drag_started() {
+                        select = Some(id);
+                    }
+                    if resp.double_clicked() && id != BACKGROUND_ID {
+                        *renaming = Some((id, plain));
+                    }
+                    if resp.drag_started() {
+                        resp.dnd_set_drag_payload(id);
+                    }
+                    if resp.dragged() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     }
                 });
-            }
-            // "Nền" luôn ở dưới cùng, chỉ ẩn / hiện được.
-            ui.horizontal(|ui| {
-                let visible = doc.state.background.visible;
-                if ui
-                    .selectable_label(visible, if visible { "👁" } else { "–" })
-                    .clicked()
-                {
-                    doc.push_undo("Show / hide layer", None);
-                    doc.state.background.visible = !visible;
+                let rect = row.response.rect;
+                let hovered = ui.rect_contains_pointer(rect);
+                let dragging = egui::DragAndDrop::payload::<u64>(ui.ctx());
+                if let (true, Some(src)) = (hovered, dragging) {
+                    // vạch chỉ chỗ thả: kéo lên → mục nằm trên dòng này, kéo xuống → nằm dưới
+                    let from = ids.iter().position(|&i| i == *src).unwrap_or(pos);
+                    let y = if from < pos { rect.top() } else { rect.bottom() };
+                    if from != pos {
+                        ui.painter().hline(rect.x_range(), y, Stroke::new(2.0, theme::CYAN));
+                    }
+                    if ui.input(|i| i.pointer.any_released()) {
+                        if let Some(p) = egui::DragAndDrop::take_payload::<u64>(ui.ctx()) {
+                            drop = Some((*p, pos));
+                        }
+                    }
                 }
-                ui.label(RichText::new(tr("Background")).color(theme::TEXT_DIM));
-            });
+            }
             if let Some(id) = toggle {
                 doc.push_undo("Show / hide layer", None);
-                if let Some(l) = doc.state.layers.iter_mut().find(|l| l.id() == id) {
+                if id == BACKGROUND_ID {
+                    doc.state.background.visible = !doc.state.background.visible;
+                } else if let Some(l) = doc.state.layers.iter_mut().find(|l| l.id() == id) {
                     let v = l.visible();
                     l.set_visible(!v);
                 }
@@ -1072,21 +1543,55 @@ impl PhotoEditorView {
             if let Some(id) = select {
                 doc.selected = Some(id);
             }
+            if let Some((id, target)) = drop {
+                doc.move_to(id, target);
+                doc.selected = Some(id);
+            }
             let has = doc.selected.is_some();
+            let is_bg = doc.selected == Some(BACKGROUND_ID);
             ui.horizontal(|ui| {
-                if widgets::secondary(ui, "▲", has).clicked() {
+                if widgets::secondary(ui, "⏶", has)
+                    .on_hover_text(tr("Bring to front (Ctrl+Shift+])"))
+                    .clicked()
+                {
+                    doc.move_selected_to_end(true);
+                }
+                if widgets::secondary(ui, "▲", has)
+                    .on_hover_text(tr("Bring forward (Ctrl+])"))
+                    .clicked()
+                {
                     doc.move_selected(1);
                 }
-                if widgets::secondary(ui, "▼", has).clicked() {
+                if widgets::secondary(ui, "▼", has)
+                    .on_hover_text(tr("Send backward (Ctrl+[)"))
+                    .clicked()
+                {
                     doc.move_selected(-1);
                 }
-                if widgets::secondary(ui, &tr("Duplicate layer"), has).clicked() {
+                if widgets::secondary(ui, "⏷", has)
+                    .on_hover_text(tr("Send to back (Ctrl+Shift+[)"))
+                    .clicked()
+                {
+                    doc.move_selected_to_end(false);
+                }
+            });
+            ui.horizontal(|ui| {
+                if widgets::secondary(ui, &tr("Duplicate layer"), has && !is_bg).clicked() {
                     doc.duplicate_selected();
                 }
-                if widgets::danger(ui, &tr("Delete layer"), has).clicked() {
+                if widgets::danger(ui, &tr("Delete layer"), has && !is_bg).clicked() {
                     doc.delete_selected();
                 }
             });
+            if doc.state.bg_pos() > 0
+                && doc.state.background.cutout.is_none()
+                && doc.state.background.opacity >= 1.0
+            {
+                widgets::subtitle(
+                    ui,
+                    &tr("An opaque background covers the layers below it — remove its background or lower its opacity to see them."),
+                );
+            }
         });
     }
 
@@ -1147,13 +1652,32 @@ impl PhotoEditorView {
         self.rebuild_composite();
         self.handle_canvas_input(&resp, rect);
         self.paint_canvas(ui, rect, iw, ih);
+        if self.mask_edit.is_none() && self.tool == Tool::Move {
+            if let Some(d) = &mut self.doc {
+                resp.context_menu(|ui| {
+                    arrange_menu(ui, d);
+                    ui.separator();
+                    let is_layer = d.selected.is_some_and(|id| id != BACKGROUND_ID);
+                    if menu_item(ui, &tr("Duplicate layer"), "Ctrl+J", is_layer) {
+                        d.duplicate_selected();
+                    }
+                    if menu_item(ui, &tr("Delete layer"), "Del", is_layer) {
+                        d.delete_selected();
+                    }
+                });
+            }
+        }
     }
 
     fn rebuild_composite(&mut self) {
         let Some(doc) = &self.doc else { return };
         if self.mask_edit.is_some() {
             if self.mask_base.is_none() || self.mask_base_rev != doc.revision {
-                self.mask_base = Some(render::render_mask_base(&doc.state, self.preview_scale));
+                self.mask_base = Some(render::render_mask_base_cached(
+                    &doc.state,
+                    self.preview_scale,
+                    &mut self.base_cache,
+                ));
                 self.mask_base_rev = doc.revision;
             }
             return;
@@ -1161,7 +1685,11 @@ impl PhotoEditorView {
         if self.composite.is_some() && self.composite_rev == doc.revision {
             return;
         }
-        self.composite = Some(render::render(&doc.state, self.preview_scale));
+        self.composite = Some(render::render_cached(
+            &doc.state,
+            self.preview_scale,
+            &mut self.base_cache,
+        ));
         self.composite_rev = doc.revision;
     }
 
@@ -1186,6 +1714,9 @@ impl PhotoEditorView {
             return None;
         }
         let layer = self.doc.as_ref()?.selected_layer()?;
+        if !layer.resizable() {
+            return None;
+        }
         let b = layer.bounds();
         corners(b)
             .iter()
@@ -1206,7 +1737,7 @@ impl PhotoEditorView {
 
         // Con trỏ chuột theo công cụ.
         if let Some(pos) = resp.hover_pos() {
-            let icon = if self.mask_edit.is_some() && !pan_override {
+            let icon = if (self.mask_edit.is_some() || self.tool == Tool::Clone) && !pan_override {
                 egui::CursorIcon::Crosshair
             } else if pan_override || self.tool == Tool::Hand {
                 if resp.dragged() {
@@ -1244,6 +1775,20 @@ impl PhotoEditorView {
             return;
         };
         let img_pt = self.to_image(rect, pos);
+
+        // Chuột phải trên canvas (Move): chọn layer dưới con trỏ để menu Sắp xếp áp cho nó.
+        if resp.secondary_clicked() && self.mask_edit.is_none() && self.tool == Tool::Move {
+            let hit = self.doc.as_ref().and_then(|d| d.layer_at(img_pt.0, img_pt.1));
+            if let Some(d) = &mut self.doc {
+                d.selected = hit.or(Some(BACKGROUND_ID));
+            }
+        }
+
+        // Tem nhân bản: Alt + bấm = chọn điểm mẫu; kéo = tô mẫu lên chỗ khác.
+        if self.tool == Tool::Clone && self.mask_edit.is_none() && !pan_override {
+            self.handle_clone_input(resp, rect, img_pt, alt);
+            return;
+        }
 
         // Chỉnh vùng tách nền: chuột trái = tô cọ (Alt = cọ ngược lại); Space / chuột giữa vẫn cuộn.
         if self.mask_edit.is_some() && !pan_override {
@@ -1290,7 +1835,7 @@ impl PhotoEditorView {
                 Some(Drag::Pan { last: pos })
             } else {
                 match self.tool {
-                    Tool::Hand | Tool::Zoom => Some(Drag::Pan { last: pos }),
+                    Tool::Hand | Tool::Zoom | Tool::Clone => Some(Drag::Pan { last: pos }),
                     Tool::Crop | Tool::Blur => Some(Drag::Rect { anchor: img_pt }),
                     Tool::Move => {
                         if let Some((id, corner, start)) = self.handle_at(rect, pos) {
@@ -1377,6 +1922,99 @@ impl PhotoEditorView {
         }
     }
 
+    fn handle_clone_input(
+        &mut self,
+        resp: &egui::Response,
+        rect: egui::Rect,
+        img_pt: (f64, f64),
+        alt: bool,
+    ) {
+        if alt {
+            if resp.clicked() || resp.drag_started() {
+                self.clone_source = Some(img_pt);
+                self.clone_offset = None;
+                self.info = None;
+            }
+            return;
+        }
+        if resp.drag_started() || resp.clicked() {
+            let start = resp
+                .ctx
+                .input(|i| i.pointer.press_origin())
+                .map(|p| self.to_image(rect, p))
+                .unwrap_or(img_pt);
+            match self.clone_source {
+                None => {
+                    self.info = Some(tr("Alt + click on the photo to pick the sample area"));
+                }
+                Some(src) => {
+                    let offset = match (self.clone_aligned, self.clone_offset) {
+                        (true, Some(o)) => o,
+                        _ => (src.0 - start.0, src.1 - start.1),
+                    };
+                    self.clone_offset = Some(offset);
+                    self.begin_clone_stroke(start, offset);
+                    if resp.drag_started() {
+                        self.extend_clone_stroke(img_pt);
+                    }
+                }
+            }
+        } else if resp.dragged() {
+            self.extend_clone_stroke(img_pt);
+        }
+        if resp.clicked() || resp.drag_stopped() {
+            self.clone_painting = None;
+            if let Some(d) = &mut self.doc {
+                d.history.break_merge();
+            }
+        }
+    }
+
+    /// Bắt đầu một nét Tem nhân bản: vào layer nhân bản đang chọn, hoặc tạo layer mới trên cùng.
+    fn begin_clone_stroke(&mut self, start: (f64, f64), offset: (f64, f64)) {
+        let (radius, hardness, opacity) =
+            (self.clone_size / 2.0, self.clone_hardness, self.clone_opacity);
+        let Some(d) = &mut self.doc else { return };
+        d.history.break_merge();
+        d.push_undo("Clone stamp", Some("clone_stroke"));
+        let id = match d.selected_layer() {
+            Some(Layer::Clone(l)) => l.id,
+            _ => d.add_clone_layer(),
+        };
+        if let Some(Layer::Clone(l)) = d.state.layers.iter_mut().find(|l| l.id() == id) {
+            l.strokes.push(CloneStroke {
+                offset,
+                points: vec![start],
+                radius,
+                hardness,
+                opacity,
+            });
+            l.visible = true;
+        }
+        self.clone_painting = Some(id);
+    }
+
+    fn extend_clone_stroke(&mut self, pt: (f64, f64)) {
+        let Some(id) = self.clone_painting else { return };
+        let min_step = (self.clone_size * 0.05).max(1.0);
+        let Some(d) = &mut self.doc else { return };
+        let far_enough = d.state.layers.iter().find(|l| l.id() == id).is_some_and(|l| match l {
+            Layer::Clone(c) => c.strokes.last().and_then(|s| s.points.last()).is_none_or(|p| {
+                ((p.0 - pt.0).powi(2) + (p.1 - pt.1).powi(2)).sqrt() >= min_step
+            }),
+            _ => false,
+        });
+        if !far_enough {
+            return;
+        }
+        d.push_undo("Clone stamp", Some("clone_stroke"));
+        if let Some(Layer::Clone(l)) = d.state.layers.iter_mut().find(|l| l.id() == id) {
+            if let Some(st) = l.strokes.last_mut() {
+                st.points.push(pt);
+            }
+        }
+    }
+
     fn paint_canvas(&mut self, ui: &mut Ui, rect: egui::Rect, iw: usize, ih: usize) {
         let ppp = ui.ctx().pixels_per_point() as f64;
         let (pw, ph) = (
@@ -1389,12 +2027,13 @@ impl PhotoEditorView {
         };
         let (scale, offset) = (self.scale, self.offset);
         let pending = self.crop_pending;
-        let selected_bounds = if self.tool == Tool::Move {
-            self.doc
-                .as_ref()
-                .and_then(|d| d.selected_layer().map(|l| l.bounds()))
+        let (selected_bounds, show_handles) = if self.tool == Tool::Move {
+            match self.doc.as_ref().and_then(|d| d.selected_layer()) {
+                Some(l) => (Some(l.bounds()), l.resizable()),
+                None => (None, false),
+            }
         } else {
-            None
+            (None, false)
         };
 
         let fb = self.canvas.begin(pw.max(1), ph.max(1));
@@ -1428,7 +2067,8 @@ impl PhotoEditorView {
             let (sw, sh) = (bw * scale * ppp, bh * scale * ppp);
             fb.stroke_rect(sx as f32, sy as f32, sw as f32, sh as f32, 1.5, [0x4f, 0x8c, 0xff, 255]);
             let k = (4.0 * ppp) as f32;
-            for (cx, cy) in corners((sx, sy, sw, sh)) {
+            let handles = if show_handles { corners((sx, sy, sw, sh)).to_vec() } else { vec![] };
+            for (cx, cy) in handles {
                 let (cx, cy) = (cx as f32, cy as f32);
                 fb.fill_rect(cx - k, cy - k, 2.0 * k, 2.0 * k, [255, 255, 255, 255]);
                 fb.stroke_rect(cx - k, cy - k, 2.0 * k, 2.0 * k, 1.0, [0x4f, 0x8c, 0xff, 255]);
@@ -1467,6 +2107,35 @@ impl PhotoEditorView {
             }
         }
         self.canvas.paint(ui, rect);
+        // Tem nhân bản: vòng cọ dưới con trỏ + dấu + ở điểm đang lấy mẫu.
+        if self.tool == Tool::Clone && self.mask_edit.is_none() {
+            let painter = ui.painter_at(rect);
+            let hover = ui.ctx().pointer_hover_pos().filter(|p| rect.contains(*p));
+            if let Some(pos) = hover {
+                let r = (self.clone_size / 2.0 * scale) as f32;
+                painter.circle_stroke(pos, r, Stroke::new(2.5, Color32::from_black_alpha(160)));
+                painter.circle_stroke(pos, r, Stroke::new(1.0, Color32::WHITE));
+            }
+            let src = match (self.clone_offset, hover) {
+                // đã có độ lệch (căn chỉnh hoặc đang tô): điểm mẫu đi theo con trỏ
+                (Some(o), Some(pos)) if self.clone_aligned || self.clone_painting.is_some() => {
+                    let p = self.to_image(rect, pos);
+                    Some((p.0 + o.0, p.1 + o.1))
+                }
+                _ => self.clone_source,
+            };
+            if let Some((x, y)) = src {
+                let c = self.to_screen(rect, x, y);
+                let k = 7.0;
+                for (stroke, color) in [(3.0, Color32::from_black_alpha(170)), (1.2, Color32::WHITE)] {
+                    let st = Stroke::new(stroke, color);
+                    painter.line_segment([c - egui::vec2(k, 0.0), c + egui::vec2(k, 0.0)], st);
+                    painter.line_segment([c - egui::vec2(0.0, k), c + egui::vec2(0.0, k)], st);
+                }
+                let r = (self.clone_size / 2.0 * scale) as f32;
+                painter.circle_stroke(c, r, Stroke::new(1.0, Color32::from_white_alpha(120)));
+            }
+        }
         // Vòng tròn cỡ cọ dưới con trỏ (chế độ chỉnh vùng tách nền).
         if let (Some(e), Some(pos)) = (&self.mask_edit, ui.ctx().pointer_hover_pos()) {
             if rect.contains(pos) {
@@ -1475,7 +2144,7 @@ impl PhotoEditorView {
                 painter.circle_stroke(pos, r, Stroke::new(2.5, Color32::from_black_alpha(160)));
                 painter.circle_stroke(pos, r, Stroke::new(1.0, Color32::WHITE));
                 let invert = ui.input(|i| i.modifiers.alt);
-                let sign = if e.add != invert { "+" } else { "−" };
+                let sign = if invert { e.brush.opposite() } else { e.brush }.sign();
                 painter.text(
                     pos + egui::vec2(r * 0.71 + 6.0, -(r * 0.71) - 6.0),
                     egui::Align2::LEFT_BOTTOM,
@@ -1580,6 +2249,31 @@ impl PhotoEditorView {
         if export {
             self.export();
         }
+        // Sắp xếp: Ctrl+] / Ctrl+[ lên / xuống một bậc, thêm Shift = lên trên cùng / xuống dưới cùng.
+        let (up, down) = ui.input(|i| {
+            (cmd && i.key_pressed(Key::CloseBracket), cmd && i.key_pressed(Key::OpenBracket))
+        });
+        if let Some(d) = &mut self.doc {
+            match (up, down, shift) {
+                (true, _, true) => d.move_selected_to_end(true),
+                (true, _, false) => d.move_selected(1),
+                (_, true, true) => d.move_selected_to_end(false),
+                (_, true, false) => d.move_selected(-1),
+                _ => {}
+            }
+        }
+        // [ ] đổi cỡ cọ của Tem nhân bản.
+        if !typing && !cmd && self.tool == Tool::Clone {
+            let (smaller, bigger) = ui.input(|i| {
+                (i.key_pressed(Key::OpenBracket), i.key_pressed(Key::CloseBracket))
+            });
+            if smaller {
+                self.clone_size = (self.clone_size / 1.2).max(2.0).round();
+            }
+            if bigger {
+                self.clone_size = (self.clone_size * 1.2).min(2000.0).round();
+            }
+        }
         // Mũi tên nhích layer 1 px (Shift = 10 px) ở công cụ Move.
         if !typing && self.tool == Tool::Move {
             let step = if shift { 10.0 } else { 1.0 };
@@ -1601,7 +2295,7 @@ impl PhotoEditorView {
             });
             if dx != 0.0 || dy != 0.0 {
                 if let Some(d) = &mut self.doc {
-                    if d.selected.is_some() {
+                    if d.selected_layer().is_some() {
                         d.push_undo("Nudge layer", Some("nudge_layer"));
                         if let Some(l) = d.selected_layer_mut() {
                             l.translate(dx, dy);
@@ -1640,7 +2334,7 @@ impl PhotoEditorView {
                 e.size = (e.size * 1.2).min(max).round();
             }
             if swap {
-                e.add = !e.add;
+                e.brush = e.brush.opposite();
             }
         }
         if undo {
@@ -1670,6 +2364,7 @@ impl PhotoEditorView {
             d.push_undo("Reset adjustments", None);
             d.state.background.adjust = PhotoAdjust::default();
             d.state.background.sharpen = SharpenSettings::default();
+            d.state.background.skin = SkinSmoothSettings::default();
             d.state.background.angle = 0.0;
         }
     }
@@ -1705,20 +2400,39 @@ impl PhotoEditorView {
         if let Some(dir) = &self.last_dir {
             dialog = dialog.set_directory(dir);
         }
-        let Some(path) = dialog.pick_file() else { return };
-        match load_rgba(&path) {
-            Ok(img) => {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                if let Some(d) = &mut self.doc {
-                    d.add_image_layer(img, &name);
+        // chọn được nhiều ảnh cùng lúc (Shift / Cmd + bấm) → mỗi ảnh một layer
+        let Some(paths) = dialog.pick_files() else { return };
+        self.insert_paths(&paths);
+    }
+
+    /// Chèn từng ảnh thành một layer (ảnh sau đè lên ảnh trước, lệch nhau một chút để thấy hết).
+    fn insert_paths(&mut self, paths: &[PathBuf]) {
+        let mut errors = vec![];
+        let mut inserted = 0;
+        for path in paths {
+            match load_rgba(path) {
+                Ok(img) => {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if let Some(d) = &mut self.doc {
+                        d.add_image_layer(img, &name);
+                        let step = d.size().0.max(d.size().1) as f64 * 0.03;
+                        if let Some(l) = d.selected_layer_mut() {
+                            l.translate(step * inserted as f64, step * inserted as f64);
+                        }
+                        inserted += 1;
+                    }
+                    self.last_dir = path.parent().map(|p| p.to_path_buf());
                 }
-                self.select_tool(Tool::Move);
+                Err(e) => errors.push(format!("{}: {e}", path.display())),
             }
-            Err(e) => self.error = Some(e.to_string()),
         }
+        if inserted > 0 {
+            self.select_tool(Tool::Move);
+        }
+        self.error = if errors.is_empty() { None } else { Some(errors.join("\n")) };
     }
 
     fn export(&mut self) {
@@ -1792,23 +2506,18 @@ fn brush_max(e: &MaskEdit) -> f64 {
     (e.w.max(e.h) as f64 / 2.0).max(50.0)
 }
 
-/// Điều khiển cọ: Thêm / Bớt, cỡ, độ cứng, chế độ xem, Áp dụng / Huỷ (`compact` = thanh tuỳ chọn:
+/// Điều khiển cọ: Thêm / Bớt / Đẩy viền / Co / Giãn, cỡ, độ cứng, chế độ xem, Áp dụng / Huỷ (`compact` = thanh tuỳ chọn:
 /// bỏ Hoàn tác / Bỏ nét tô).
 fn mask_controls(ui: &mut Ui, e: &mut MaskEdit, compact: bool) -> Option<MaskAction> {
     let mut action = None;
-    if ui
-        .selectable_label(e.add, tr("+ Add"))
-        .on_hover_text(tr("Paint to keep more (X to switch)"))
-        .clicked()
-    {
-        e.add = true;
-    }
-    if ui
-        .selectable_label(!e.add, tr("− Subtract"))
-        .on_hover_text(tr("Paint to remove more (X to switch)"))
-        .clicked()
-    {
-        e.add = false;
+    for brush in MaskBrush::ALL {
+        if ui
+            .selectable_label(e.brush == brush, tr(brush.label()))
+            .on_hover_text(tr(brush.tooltip()))
+            .clicked()
+        {
+            e.brush = brush;
+        }
     }
     ui.separator();
     let max = brush_max(e);
@@ -1878,6 +2587,50 @@ fn color_swatch(ui: &mut Ui, rgb: [u8; 3], selected: bool) -> egui::Response {
     };
     p.rect_stroke(rect.shrink(1.0), 5.0, stroke, egui::StrokeKind::Inside);
     resp
+}
+
+/// Ảnh thu nhỏ của một dòng trong bảng Layer.
+enum Thumb {
+    Image(egui::TextureHandle),
+    Icon(ToolButton),
+}
+
+/// Texture thu nhỏ (cạnh dài 64 px) của ảnh layer / nền; chỉ tạo lại khi ảnh đổi (con trỏ `Arc`).
+fn layer_thumb(
+    thumbs: &mut HashMap<u64, (usize, egui::TextureHandle)>,
+    ctx: &egui::Context,
+    id: u64,
+    img: &Arc<RgbaImage>,
+) -> egui::TextureHandle {
+    let key = Arc::as_ptr(img) as usize;
+    if let Some((k, tex)) = thumbs.get(&id) {
+        if *k == key {
+            return tex.clone();
+        }
+    }
+    let small = crate::preview::downscale_to(img, 64);
+    let color = egui::ColorImage::from_rgba_unmultiplied([small.w.max(1), small.h.max(1)], &small.data);
+    let tex = ctx.load_texture(format!("layer_thumb_{id}"), color, egui::TextureOptions::LINEAR);
+    thumbs.insert(id, (key, tex.clone()));
+    tex
+}
+
+/// Mục "Sắp xếp" (Edit menu + menu chuột phải trên canvas): đưa lên trên cùng / lên / xuống /
+/// xuống dưới cùng cho layer hoặc nền đang chọn.
+fn arrange_menu(ui: &mut Ui, d: &mut Document) {
+    let has = d.selected.is_some();
+    if menu_item(ui, &tr("Bring to front"), "Ctrl+Shift+]", has) {
+        d.move_selected_to_end(true);
+    }
+    if menu_item(ui, &tr("Bring forward"), "Ctrl+]", has) {
+        d.move_selected(1);
+    }
+    if menu_item(ui, &tr("Send backward"), "Ctrl+[", has) {
+        d.move_selected(-1);
+    }
+    if menu_item(ui, &tr("Send to back"), "Ctrl+Shift+[", has) {
+        d.move_selected_to_end(false);
+    }
 }
 
 fn menu_item(ui: &mut Ui, label: &str, shortcut: &str, enabled: bool) -> bool {
@@ -1952,6 +2705,19 @@ fn paint_icon(p: &egui::Painter, r: egui::Rect, button: ToolButton, color: Color
                 pts.push(Pos2::new(c.x + rad * a.cos(), c.y + rad * a.sin()));
             }
             p.add(egui::Shape::closed_line(pts, s));
+        }
+        ToolButton::Tool(Tool::Clone) => {
+            // con dấu: tay cầm + thân + đế
+            p.circle_stroke(at(0.5, 0.18), 0.14 * r.width(), s);
+            line(&[(0.42, 0.3), (0.42, 0.55)]);
+            line(&[(0.58, 0.3), (0.58, 0.55)]);
+            p.rect_stroke(
+                egui::Rect::from_min_max(at(0.12, 0.55), at(0.88, 0.78)),
+                2.0,
+                s,
+                egui::StrokeKind::Middle,
+            );
+            line(&[(0.12, 0.92), (0.88, 0.92)]);
         }
         ToolButton::Tool(Tool::Hand) => {
             for x in [0.3, 0.45, 0.6, 0.75] {

@@ -19,6 +19,8 @@
 | Sửa ảnh đơn (canvas, layer, công cụ, xuất, file dự án) | [instruction/photo-editor.md](instruction/photo-editor.md) | [changelog/photo-editor.md](changelog/photo-editor.md) |
 | Cắt ghép layout (collage) | [instruction/collage.md](instruction/collage.md) | [changelog/collage.md](changelog/collage.md) |
 | Tăng độ nét (Unsharp Mask, Clarity) trong Sửa ảnh đơn | [instruction/sharpen.md](instruction/sharpen.md) | [changelog/sharpen.md](changelog/sharpen.md) |
+| Làm mịn da trong Sửa ảnh đơn | [instruction/skin-smoothing.md](instruction/skin-smoothing.md) | [changelog/skin-smoothing.md](changelog/skin-smoothing.md) |
+| Tem nhân bản (Clone Stamp) trong Sửa ảnh đơn | [instruction/clone-stamp.md](instruction/clone-stamp.md) | [changelog/clone-stamp.md](changelog/clone-stamp.md) |
 | Tách nền / xoá phông / thay nền (AI, ảnh thẻ) trong Sửa ảnh đơn | [instruction/background-removal.md](instruction/background-removal.md) | [changelog/background-removal.md](changelog/background-removal.md) |
 | Sửa video (FFmpeg: cắt, tắt tiếng, chữ, nhạc, xuất) | [instruction/video-editor.md](instruction/video-editor.md) | [changelog/video-editor.md](changelog/video-editor.md) |
 | Port sang Rust (chuyển toàn bộ app sang Rust, theo giai đoạn) | [instruction/rust-port.md](instruction/rust-port.md) | [changelog/rust-port.md](changelog/rust-port.md) |

@@ -4,9 +4,10 @@
 
 use pbe_core::photo::effects::PhotoAdjust;
 use pbe_core::photo::matting::{Backdrop, Cutout, Matte};
+use pbe_core::photo::skin::SkinSmoothSettings;
 use pbe_core::photo::RgbaImage;
 use pbe_gui::fb::Framebuffer;
-use pbe_gui::photo::doc::{BlurLayer, Document, Layer};
+use pbe_gui::photo::doc::{BlurLayer, CloneStroke, Document, Layer, BACKGROUND_ID};
 use pbe_gui::photo::render;
 use pbe_gui::preview;
 
@@ -272,4 +273,241 @@ fn cutout_matte_follows_crop_rotate_flip_and_undo() {
     // undo hết → về ảnh gốc, matte gốc
     while doc.undo() {}
     assert_eq!(matte_size(&doc), (80, 40));
+}
+
+// --- Thứ tự layer: nền đưa lên trên / xuống dưới layer khác ---------------------------------
+
+#[test]
+fn background_can_move_above_layers_and_back() {
+    let mut doc = Document::new(RgbaImage::filled(40, 80, [200, 100, 50, 255]), None);
+    doc.add_image_layer(RgbaImage::filled(10, 10, [0, 255, 0, 255]), "a");
+    doc.add_image_layer(RgbaImage::filled(10, 10, [0, 0, 255, 255]), "b");
+    let (a, b) = (doc.state.layers[0].id(), doc.state.layers[1].id());
+    assert_eq!(doc.state.stack_ids(), vec![BACKGROUND_ID, a, b]);
+    // mặc định: layer b (trên cùng) thấy ở giữa
+    assert_eq!(render::render(&doc.state, 1.0).px(20, 40), [0, 0, 255, 255]);
+
+    // đưa nền lên trên cùng → nền đục che hết layer
+    doc.selected = Some(BACKGROUND_ID);
+    doc.move_selected_to_end(true);
+    assert_eq!(doc.state.stack_ids(), vec![a, b, BACKGROUND_ID]);
+    assert_eq!(doc.state.bg_index, 2);
+    assert_eq!(render::render(&doc.state, 1.0).px(20, 40), [200, 100, 50, 255]);
+
+    // nền trong suốt một nửa (đã tách nền) → layer bên dưới lộ ra ở phần đã xoá
+    let mut cut = Cutout::new(left_half_matte(40, 80));
+    cut.settings.decontaminate = false;
+    doc.state.background.cutout = Some(cut);
+    let out = render::render(&doc.state, 1.0);
+    assert_eq!(out.px(20, 41), [0, 0, 255, 255], "layer dưới nền phải lộ ở phần trong suốt");
+    assert_eq!(out.px(20, 5), [200, 100, 50, 255]);
+    doc.state.background.cutout = None;
+
+    // opacity nền 50 % khi nằm trên layer
+    doc.state.background.opacity = 0.5;
+    let c = render::render(&doc.state, 1.0).px(20, 40);
+    // nền [200,100,50] 50 % trên layer xanh [0,0,255]
+    assert!((95..=105).contains(&c[0]) && (148..=156).contains(&c[2]), "trộn opacity sai: {c:?}");
+    doc.state.background.opacity = 1.0;
+
+    // một bậc xuống: nền nằm giữa a và b → b thấy, a bị che
+    doc.move_selected(-1);
+    assert_eq!(doc.state.stack_ids(), vec![a, BACKGROUND_ID, b]);
+    assert_eq!(render::render(&doc.state, 1.0).px(20, 40), [0, 0, 255, 255]);
+
+    // undo trả lại thứ tự cũ
+    assert!(doc.undo());
+    assert_eq!(doc.state.stack_ids(), vec![a, b, BACKGROUND_ID]);
+}
+
+#[test]
+fn reorder_delete_duplicate_keep_background_slot() {
+    let mut doc = Document::new(RgbaImage::filled(20, 20, [9, 9, 9, 255]), None);
+    for n in ["a", "b", "c"] {
+        doc.add_image_layer(RgbaImage::filled(4, 4, [255, 0, 0, 255]), n);
+    }
+    let ids: Vec<u64> = doc.state.layers.iter().map(|l| l.id()).collect();
+    // đổi chỗ a lên trên b (ví dụ "ảnh 1 đè lên ảnh 2")
+    doc.selected = Some(ids[0]);
+    doc.move_selected(1);
+    assert_eq!(doc.state.stack_ids(), vec![BACKGROUND_ID, ids[1], ids[0], ids[2]]);
+    // kéo thả: c xuống dưới nền
+    assert!(doc.move_to(ids[2], 0));
+    assert_eq!(doc.state.stack_ids(), vec![ids[2], BACKGROUND_ID, ids[1], ids[0]]);
+    assert_eq!(doc.state.bg_index, 1);
+    // nhân đôi layer dưới nền → bản sao vẫn dưới nền
+    doc.selected = Some(ids[2]);
+    doc.duplicate_selected();
+    assert_eq!(doc.state.bg_index, 2);
+    // xoá layer dưới nền → nền tụt xuống
+    doc.delete_selected();
+    doc.selected = Some(ids[2]);
+    doc.delete_selected();
+    assert_eq!(doc.state.bg_index, 0);
+    assert_eq!(doc.state.stack_ids(), vec![BACKGROUND_ID, ids[1], ids[0]]);
+    // nền không xoá / nhân đôi được
+    doc.selected = Some(BACKGROUND_ID);
+    doc.delete_selected();
+    doc.duplicate_selected();
+    assert_eq!(doc.state.layers.len(), 2);
+}
+
+// --- Tem nhân bản ---------------------------------------------------------------------------
+
+/// Nửa trái đỏ, nửa phải xanh.
+fn two_tone(h: usize, w: usize) -> RgbaImage {
+    let mut img = RgbaImage::new(h, w);
+    for y in 0..h {
+        for x in 0..w {
+            img.set_px(y, x, if x < w / 2 { [255, 0, 0, 255] } else { [0, 0, 255, 255] });
+        }
+    }
+    img
+}
+
+#[test]
+fn clone_stamp_copies_the_sample_at_every_scale() {
+    let mut doc = Document::new(two_tone(60, 120), None);
+    let id = doc.add_clone_layer();
+    if let Some(Layer::Clone(l)) = doc.state.layers.iter_mut().find(|l| l.id() == id) {
+        // tô ở bên phải (xanh), lấy mẫu lệch 60 px sang trái (đỏ)
+        l.strokes.push(CloneStroke {
+            offset: (-60.0, 0.0),
+            points: vec![(80.0, 30.0), (100.0, 30.0)],
+            radius: 8.0,
+            hardness: 1.0,
+            opacity: 1.0,
+        });
+    }
+    for scale in [1.0, 0.5] {
+        let out = render::render(&doc.state, scale);
+        let s = |v: f64| (v * scale) as usize;
+        assert_eq!(out.px(s(30.0), s(90.0)), [255, 0, 0, 255], "nét phải lấy màu đỏ (scale {scale})");
+        assert_eq!(out.px(s(5.0), s(90.0)), [0, 0, 255, 255], "ngoài nét giữ nguyên");
+        assert_eq!(out.px(s(30.0), s(10.0)), [255, 0, 0, 255]);
+    }
+    // ẩn layer / opacity
+    let (b, _, w, _) = doc.state.layers[0].bounds();
+    assert!((b - 72.0).abs() < 1e-9 && (w - 36.0).abs() < 1e-9);
+    doc.state.layers[0].set_opacity(0.5);
+    let c = render::render(&doc.state, 1.0).px(30, 90);
+    assert!((120..=135).contains(&c[0]) && (120..=135).contains(&c[2]), "{c:?}");
+}
+
+#[test]
+fn clone_stroke_follows_flip_and_move() {
+    let mut doc = Document::new(two_tone(60, 120), None);
+    let id = doc.add_clone_layer();
+    if let Some(Layer::Clone(l)) = doc.state.layers.iter_mut().find(|l| l.id() == id) {
+        l.strokes.push(CloneStroke {
+            offset: (-60.0, 0.0),
+            points: vec![(90.0, 30.0)],
+            radius: 6.0,
+            hardness: 1.0,
+            opacity: 1.0,
+        });
+    }
+    doc.flip(true); // đỏ sang phải, nét sang trái, độ lệch đổi chiều
+    let Layer::Clone(l) = &doc.state.layers[0] else { panic!() };
+    assert_eq!(l.strokes[0].offset, (60.0, 0.0));
+    assert_eq!(render::render(&doc.state, 1.0).px(30, 30), [255, 0, 0, 255]);
+    doc.state.layers[0].translate(0.0, 10.0);
+    let Layer::Clone(l) = &doc.state.layers[0] else { panic!() };
+    assert_eq!(l.strokes[0].points[0], (30.0, 40.0));
+}
+
+// --- Làm mịn da + bộ nhớ đệm nền -----------------------------------------------------------
+
+#[test]
+fn render_applies_skin_smoothing_and_cache_matches() {
+    // da có nhiễu
+    let mut img = RgbaImage::new(40, 40);
+    for y in 0..40 {
+        for x in 0..40 {
+            let j = ((x * 37 + y * 91) % 21) as i32 - 10;
+            let v = |c: i32| (c + j).clamp(0, 255) as u8;
+            img.set_px(y, x, [v(224), v(172), v(140), 255]);
+        }
+    }
+    let red_std = |img: &RgbaImage| {
+        let v: Vec<f64> = img.data.as_chunks::<4>().0.iter().map(|p| p[0] as f64).collect();
+        let m = v.iter().sum::<f64>() / v.len() as f64;
+        (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+    };
+    let mut doc = Document::new(img, None);
+    let before = red_std(&render::render(&doc.state, 1.0));
+    doc.state.background.skin = SkinSmoothSettings {
+        amount: 100.0,
+        radius: 4.0,
+        detail: 0.0,
+        skin_only: true,
+    };
+    let smooth = render::render(&doc.state, 1.0);
+    let after = red_std(&smooth);
+    assert!(after < before * 0.6, "da chưa mịn hơn: {before:.2} → {after:.2}");
+
+    let mut cache = render::BaseCache::default();
+    assert_eq!(render::render_cached(&doc.state, 1.0, &mut cache), smooth);
+    // đổi layer không đổi nền → vẫn đúng; đổi thông số → tính lại
+    doc.add_image_layer(RgbaImage::filled(4, 4, [0, 0, 0, 255]), "x");
+    assert_eq!(render::render_cached(&doc.state, 1.0, &mut cache), render::render(&doc.state, 1.0));
+    doc.state.background.skin.amount = 0.0;
+    assert_eq!(render::render_cached(&doc.state, 1.0, &mut cache), render::render(&doc.state, 1.0));
+}
+
+// --- Nhiều layer kiểu Photoshop -------------------------------------------------------------
+
+#[test]
+fn new_layers_go_right_above_the_selection() {
+    let mut doc = Document::new(RgbaImage::filled(100, 100, [9, 9, 9, 255]), None);
+    for n in ["1", "2", "3", "4"] {
+        doc.add_image_layer(RgbaImage::filled(10, 10, [255, 0, 0, 255]), n);
+    }
+    let ids: Vec<u64> = doc.state.layers.iter().map(|l| l.id()).collect();
+    // chọn ảnh 2 rồi chèn → nằm ngay trên ảnh 2, dưới ảnh 3
+    doc.selected = Some(ids[1]);
+    doc.add_image_layer(RgbaImage::filled(10, 10, [0, 255, 0, 255]), "5");
+    let new = doc.selected.unwrap();
+    assert_eq!(doc.state.stack_ids(), vec![BACKGROUND_ID, ids[0], ids[1], new, ids[2], ids[3]]);
+    // chọn Nền → layer mới ngay trên Nền
+    doc.selected = Some(BACKGROUND_ID);
+    doc.add_image_layer(RgbaImage::filled(10, 10, [0, 0, 255, 255]), "6");
+    assert_eq!(doc.state.stack_ids()[1], doc.selected.unwrap());
+    // layer dưới Nền đang chọn → layer mới cũng dưới Nền
+    assert!(doc.move_to(ids[3], 0));
+    doc.selected = Some(ids[3]);
+    doc.add_image_layer(RgbaImage::filled(10, 10, [0, 0, 255, 255]), "7");
+    let s = doc.state.stack_ids();
+    assert_eq!(&s[..3], &[ids[3], doc.selected.unwrap(), BACKGROUND_ID]);
+    // đổi tên (1 bước undo), tên rỗng bị bỏ qua
+    doc.rename_layer(ids[0], "  Logo  ");
+    assert_eq!(doc.state.layers.iter().find(|l| l.id() == ids[0]).unwrap().name(), "Logo");
+    doc.rename_layer(ids[0], " ");
+    assert_eq!(doc.state.layers.iter().find(|l| l.id() == ids[0]).unwrap().name(), "Logo");
+    assert!(doc.undo());
+    assert_eq!(doc.state.layers.iter().find(|l| l.id() == ids[0]).unwrap().name(), "1");
+}
+
+#[test]
+fn clicking_picks_the_top_layer_with_pixels() {
+    let mut doc = Document::new(RgbaImage::filled(100, 100, [9, 9, 9, 255]), None);
+    doc.add_image_layer(RgbaImage::filled(40, 40, [255, 0, 0, 255]), "red");
+    let red = doc.selected.unwrap();
+    // PNG trong suốt phủ lên, chỉ có pixel ở nửa trái
+    let mut png = RgbaImage::new(40, 40);
+    for y in 0..40 {
+        for x in 0..20 {
+            png.set_px(y, x, [0, 255, 0, 255]);
+        }
+    }
+    doc.add_image_layer(png, "half");
+    let half = doc.selected.unwrap();
+    // cả hai cùng tâm (50, 50), cỡ 40 → nửa trái của PNG là x 30–50
+    assert_eq!(doc.layer_at(35.0, 50.0), Some(half));
+    assert_eq!(doc.layer_at(65.0, 50.0), Some(red), "chỗ trong suốt của PNG phải chọn layer dưới");
+    assert_eq!(doc.layer_at(5.0, 5.0), None);
+    // Nền đục đưa lên trên cùng → che hết, bấm không chọn được layer dưới
+    doc.selected = Some(BACKGROUND_ID);
+    doc.move_selected_to_end(true);
+    assert_eq!(doc.layer_at(35.0, 50.0), None);
 }

@@ -1,19 +1,77 @@
 //! Ghép tài liệu photo editor thành pixel, **bằng CPU**. Port của `ui/photo/render.py`.
-//! Thứ tự nền: Adjust → Unsharp Mask → tách nền (matte) → xoay tự do → nền thay thế → layer.
+//! Thứ tự nền: Adjust → Làm mịn da → Unsharp Mask → tách nền (matte) → xoay tự do → nền thay thế.
+//! Nền nằm ở vị trí `DocState::bg_index` trong ngăn layer (mặc định dưới cùng).
 //!
 //! Một hàm duy nhất [`render`] dùng cho cả xem trước (scale < 1, nhanh) và xuất file
 //! (scale = 1), nên những gì thấy trên canvas đúng bằng những gì được ghi ra.
 
-use pbe_core::photo::effects::{apply_blur_effect, apply_photo_adjust, unsharp_mask};
+use std::sync::Arc;
+
+use pbe_core::photo::effects::{
+    apply_blur_effect, apply_photo_adjust, unsharp_mask, PhotoAdjust, SharpenSettings,
+};
 use pbe_core::photo::geometry::cover_scale;
-use pbe_core::photo::matting::{apply_cutout, composite_backdrop};
+use pbe_core::photo::matting::{apply_cutout, composite_backdrop, dab_weight};
+use pbe_core::photo::skin::{smooth_skin, SkinSmoothSettings};
 use pbe_core::photo::RgbaImage;
 
-use crate::photo::doc::{DocState, Layer};
+use crate::photo::doc::{CloneLayer, DocState, Layer};
 use crate::preview::downscale_to;
 
-/// Ảnh nền ở tỉ lệ `scale` đã Adjust + Unsharp Mask (chưa tách nền, chưa xoay tự do) và tỉ lệ
-/// thực tế sau khi làm tròn.
+/// Bộ nhớ đệm ảnh nền đã chỉnh (Adjust + làm mịn da + Unsharp Mask): kéo layer, tô Tem nhân bản…
+/// không phải tính lại các bộ lọc nặng mỗi khung hình.
+#[derive(Default)]
+pub struct BaseCache {
+    key: Option<BaseKey>,
+    value: Option<(RgbaImage, f64)>,
+}
+
+struct BaseKey {
+    img: Arc<RgbaImage>,
+    adjust: PhotoAdjust,
+    skin: SkinSmoothSettings,
+    sharpen: SharpenSettings,
+    scale: f64,
+}
+
+impl BaseKey {
+    fn of(state: &DocState, scale: f64) -> Self {
+        let bg = &state.background;
+        BaseKey {
+            img: bg.img.clone(),
+            adjust: bg.adjust,
+            skin: bg.skin,
+            sharpen: bg.sharpen,
+            scale,
+        }
+    }
+
+    fn same(&self, o: &BaseKey) -> bool {
+        Arc::ptr_eq(&self.img, &o.img)
+            && self.adjust == o.adjust
+            && self.skin == o.skin
+            && self.sharpen == o.sharpen
+            && self.scale == o.scale
+    }
+}
+
+impl BaseCache {
+    fn get(&mut self, state: &DocState, scale: f64) -> (RgbaImage, f64) {
+        let key = BaseKey::of(state, scale);
+        if let (Some(k), Some(v)) = (&self.key, &self.value) {
+            if k.same(&key) {
+                return v.clone();
+            }
+        }
+        let v = adjusted_background(state, scale);
+        self.key = Some(key);
+        self.value = Some(v.clone());
+        v
+    }
+}
+
+/// Ảnh nền ở tỉ lệ `scale` đã Adjust + làm mịn da + Unsharp Mask (chưa tách nền, chưa xoay tự do)
+/// và tỉ lệ thực tế sau khi làm tròn.
 fn adjusted_background(state: &DocState, scale: f64) -> (RgbaImage, f64) {
     let bg = &state.background;
     let full_long = bg.img.long_side();
@@ -21,7 +79,7 @@ fn adjusted_background(state: &DocState, scale: f64) -> (RgbaImage, f64) {
         let target = ((full_long as f64 * scale).round() as usize).max(1);
         downscale_to(&bg.img, target)
     } else {
-        bg.img.clone()
+        bg.img.as_ref().clone()
     };
     let s = canvas.w as f64 / bg.img.w.max(1) as f64;
     if canvas.is_empty() {
@@ -29,6 +87,9 @@ fn adjusted_background(state: &DocState, scale: f64) -> (RgbaImage, f64) {
     }
     if !bg.adjust.is_default() {
         canvas = apply_photo_adjust(&canvas, &bg.adjust, Some(full_long));
+    }
+    if !bg.skin.is_default() {
+        canvas = smooth_skin(&canvas, &bg.skin, s);
     }
     if !bg.sharpen.is_default() {
         canvas = unsharp_mask(&canvas, &bg.sharpen, s);
@@ -42,37 +103,63 @@ pub fn render_mask_base(state: &DocState, scale: f64) -> RgbaImage {
     adjusted_background(state, scale).0
 }
 
+/// [`render_mask_base`] dùng bộ nhớ đệm.
+pub fn render_mask_base_cached(state: &DocState, scale: f64, cache: &mut BaseCache) -> RgbaImage {
+    cache.get(state, scale).0
+}
+
 /// Ghép tài liệu ở tỉ lệ `scale` (1.0 = độ phân giải thật).
 pub fn render(state: &DocState, scale: f64) -> RgbaImage {
-    let bg = &state.background;
-    let (mut canvas, s) = adjusted_background(state, scale);
-    if canvas.is_empty() {
-        return canvas;
-    }
+    compose(state, adjusted_background(state, scale))
+}
 
-    if !bg.visible {
-        canvas = RgbaImage::new(canvas.h, canvas.w);
-    } else {
+/// [`render`] dùng bộ nhớ đệm ảnh nền đã chỉnh (canvas).
+pub fn render_cached(state: &DocState, scale: f64, cache: &mut BaseCache) -> RgbaImage {
+    compose(state, cache.get(state, scale))
+}
+
+fn compose(state: &DocState, (mut base, s): (RgbaImage, f64)) -> RgbaImage {
+    let bg = &state.background;
+    if base.is_empty() {
+        return base;
+    }
+    if bg.visible {
         // Tách nền: matte → alpha (sau chỉnh màu để khử màu viền dùng đúng màu đang thấy).
         if let Some(c) = &bg.cutout {
-            apply_cutout(&mut canvas, c, s);
+            apply_cutout(&mut base, c, s);
         }
         if bg.angle.abs() > 1e-6 {
-            canvas = rotate_cover(&canvas, bg.angle);
+            base = rotate_cover(&base, bg.angle);
         }
         // Nền thay thế vẽ sau khi xoay để luôn phủ kín khung.
         if let Some(c) = &bg.cutout {
-            canvas = composite_backdrop(&canvas, &c.backdrop);
+            base = composite_backdrop(&base, &c.backdrop);
         }
     }
+    let below = state.bg_pos();
+    let opacity = bg.opacity.clamp(0.0, 1.0);
+    if bg.visible && below == 0 && opacity >= 1.0 {
+        // nền dưới cùng, đục (mặc định): dùng thẳng làm canvas
+        draw_layers(&mut base, &state.layers, s);
+        return base;
+    }
+    let mut canvas = RgbaImage::new(base.h, base.w);
+    draw_layers(&mut canvas, &state.layers[..below], s);
+    if bg.visible {
+        blend_image(&mut canvas, &base, opacity);
+    }
+    draw_layers(&mut canvas, &state.layers[below..], s);
+    canvas
+}
 
-    for layer in &state.layers {
+fn draw_layers(canvas: &mut RgbaImage, layers: &[Layer], s: f64) {
+    for layer in layers {
         if !layer.visible() {
             continue;
         }
         match layer {
             Layer::Image(l) => draw_transformed(
-                &mut canvas,
+                canvas,
                 &l.img,
                 l.x * s,
                 l.y * s,
@@ -85,11 +172,107 @@ pub fn render(state: &DocState, scale: f64) -> RgbaImage {
             ),
             Layer::Blur(l) => {
                 let rect = (l.rect.0 * s, l.rect.1 * s, l.rect.2 * s, l.rect.3 * s);
-                apply_blur_layer(&mut canvas, rect, &l.mode, l.strength, &l.shape, l.opacity);
+                apply_blur_layer(canvas, rect, &l.mode, l.strength, &l.shape, l.opacity);
+            }
+            Layer::Clone(l) => apply_clone_layer(canvas, l, s),
+        }
+    }
+}
+
+/// Vẽ cả ảnh `src` (cùng cỡ) lên `dst` với độ trong suốt `opacity`.
+fn blend_image(dst: &mut RgbaImage, src: &RgbaImage, opacity: f32) {
+    let op = opacity.clamp(0.0, 1.0);
+    for y in 0..src.h.min(dst.h) {
+        for x in 0..src.w.min(dst.w) {
+            let mut c = src.px(y, x);
+            c[3] = (c[3] as f32 * op).round() as u8;
+            blend_px(dst, x, y, c);
+        }
+    }
+}
+
+/// Tem nhân bản: mỗi nét tô pixel lấy từ chỗ lệch `offset` của chính ảnh ghép bên dưới (lấy mẫu
+/// trước khi nét được vẽ, nên nét không tự lặp lại), mép cọ mềm theo độ cứng.
+fn apply_clone_layer(canvas: &mut RgbaImage, l: &CloneLayer, s: f64) {
+    for st in &l.strokes {
+        if st.points.is_empty() {
+            continue;
+        }
+        let r = (st.radius * s).max(0.5);
+        let inner = r * st.hardness.clamp(0.0, 1.0);
+        let pts: Vec<(f64, f64)> = st.points.iter().map(|&(x, y)| (x * s, y * s)).collect();
+        // hình bao nét (px canvas, kẹp trong ảnh)
+        let (mut ax, mut ay, mut bx, mut by) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+        for &(x, y) in &pts {
+            (ax, ay, bx, by) = (ax.min(x - r), ay.min(y - r), bx.max(x + r), by.max(y + r));
+        }
+        let x0 = (ax.floor().max(0.0) as usize).min(canvas.w);
+        let y0 = (ay.floor().max(0.0) as usize).min(canvas.h);
+        let x1 = (bx.ceil().max(0.0) as usize).min(canvas.w);
+        let y1 = (by.ceil().max(0.0) as usize).min(canvas.h);
+        if x0 >= x1 || y0 >= y1 {
+            continue;
+        }
+        let (mw, mh) = (x1 - x0, y1 - y0);
+        // độ phủ của nét = max trọng số các chấm cọ (cách nhau ¼ bán kính)
+        let mut mask = vec![0f32; mw * mh];
+        let mut dab = |cx: f64, cy: f64| {
+            let dx0 = ((cx - r).floor().max(x0 as f64) as usize).min(x1);
+            let dy0 = ((cy - r).floor().max(y0 as f64) as usize).min(y1);
+            let dx1 = ((cx + r).ceil().max(0.0) as usize).min(x1);
+            let dy1 = ((cy + r).ceil().max(0.0) as usize).min(y1);
+            for y in dy0..dy1 {
+                let ddy = y as f64 + 0.5 - cy;
+                for x in dx0..dx1 {
+                    let ddx = x as f64 + 0.5 - cx;
+                    let k = dab_weight((ddx * ddx + ddy * ddy).sqrt(), r, inner) as f32;
+                    let m = &mut mask[(y - y0) * mw + (x - x0)];
+                    *m = m.max(k);
+                }
+            }
+        };
+        dab(pts[0].0, pts[0].1);
+        let step = (r * 0.25).max(0.5);
+        for w in pts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
+            let n = (len / step).ceil().max(1.0) as usize;
+            for i in 1..=n {
+                let t = i as f64 / n as f64;
+                dab(a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            }
+        }
+        // vùng nguồn (lệch `offset`), chụp lại trước khi vẽ
+        let (ox, oy) = (st.offset.0 * s, st.offset.1 * s);
+        let sx0 = ((x0 as f64 + ox - 1.0).floor().max(0.0) as usize).min(canvas.w);
+        let sy0 = ((y0 as f64 + oy - 1.0).floor().max(0.0) as usize).min(canvas.h);
+        let sx1 = ((x1 as f64 + ox + 1.0).ceil().max(0.0) as usize).min(canvas.w);
+        let sy1 = ((y1 as f64 + oy + 1.0).ceil().max(0.0) as usize).min(canvas.h);
+        if sx0 >= sx1 || sy0 >= sy1 {
+            continue; // nguồn nằm hẳn ngoài ảnh
+        }
+        let src = canvas.crop(sx0, sy0, sx1 - sx0, sy1 - sy0);
+        let op = st.opacity.clamp(0.0, 1.0) * l.opacity.clamp(0.0, 1.0);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let k = mask[(y - y0) * mw + (x - x0)] * op;
+                if k <= 0.0 {
+                    continue;
+                }
+                let c = sample_bilinear(
+                    &src,
+                    x as f64 + 0.5 + ox - sx0 as f64,
+                    y as f64 + 0.5 + oy - sy0 as f64,
+                );
+                let d = canvas.px(y, x);
+                let mut out = [0u8; 4];
+                for i in 0..4 {
+                    out[i] = (d[i] as f32 + k * (c[i] as f32 - d[i] as f32)).round() as u8;
+                }
+                canvas.set_px(y, x, out);
             }
         }
     }
-    canvas
 }
 
 /// Xoay quanh tâm và phóng để vẫn phủ kín khung (làm thẳng ảnh, như Photoshop).

@@ -8,11 +8,16 @@
     zoom tại con trỏ, khung crop theo tỉ lệ, xoay 90° / lật toạ độ, cover_scale cho xoay tự do),
     `effects.rs` (blur / pixelate, `PhotoAdjust` → `AdjustmentSettings`),
     `image_io.rs` (đọc RGBA giữ trong suốt, ghi JPEG/PNG, thư mục `editor`), `collage.rs` (xem collage.md)
-  - `rust/gui/src/photo/`: `doc.rs` (Document + ImageLayer / BlurLayer + Background, `Layer::set_bounds`,
-    `Document::new_untitled`), `render.rs` (ghép CPU: nền → Adjust → Unsharp Mask → xoay tự do → layer),
+  - `rust/gui/src/photo/`: `doc.rs` (Document + ImageLayer / BlurLayer / CloneLayer + Background,
+    `DocState::bg_index` / `stack_ids`, `Document::move_to` / `move_selected` / `move_selected_to_end`,
+    `BACKGROUND_ID`, `Layer::set_bounds`, `Document::new_untitled`), `render.rs` (ghép CPU: nền → Adjust →
+    Làm mịn da → Unsharp Mask → tách nền → xoay tự do, chèn vào ngăn layer tại `bg_index`; `BaseCache`),
     `mod.rs` (bố cục Photoshop: menu, options bar, toolbox dọc, status bar; zoom / pan; công cụ Move,
-    Crop, Blur, Hand, Zoom; nút góc đổi cỡ; panel Thuộc tính / Adjust / Độ nét / Layer / Xuất),
+    Crop, Blur, Tem nhân bản, Hand, Zoom; nút góc đổi cỡ; panel Thuộc tính / Tách nền / Adjust / Làm mịn da /
+    Độ nét / Làm nét AI / Layer / Xuất; menu chuột phải Sắp xếp),
     `collage.rs` (cửa sổ cắt ghép — xem collage.md)
+  - Làm mịn da: [skin-smoothing.md](skin-smoothing.md); Tem nhân bản: [clone-stamp.md](clone-stamp.md);
+    Unsharp Mask + Làm nét bằng AI: [sharpen.md](sharpen.md).
   - Tách nền / thay nền: `rust/core/src/photo/matting.rs`, `rust/core/src/bg_remove.rs`,
     `rust/gui/src/photo/mask_edit.rs` (chế độ chỉnh vùng chọn bằng cọ trước khi tách) — xem
     [background-removal.md](background-removal.md)
@@ -29,24 +34,57 @@
 
 - **Bố cục kiểu Photoshop** (thứ tự panel egui: menu → options → status → toolbox → panel phải → canvas):
   - **Thanh menu** (trên cùng): File (Mở ảnh Ctrl+O, Ảnh ghép mới…, Chèn ảnh, Xuất Ctrl+E, Đóng ảnh),
-    Edit (Hoàn tác Ctrl+Z, Làm lại Ctrl+Shift+Z, Nhân đôi layer Ctrl+J, Xoá layer Del), Image (xoay trái /
-    phải 90°, lật ngang / dọc, Cắt, Tách nền, Đặt lại chỉnh sửa), View (phóng to / thu nhỏ, Vừa màn hình Ctrl+0,
+    Edit (Hoàn tác Ctrl+Z, Làm lại Ctrl+Shift+Z, Nhân đôi layer Ctrl+J, Xoá layer Del, Sắp xếp: Đưa lên trên
+    cùng Ctrl+Shift+] / lên một lớp Ctrl+] / xuống một lớp Ctrl+[ / xuống dưới cùng Ctrl+Shift+[), Image (xoay
+    trái / phải 90°, lật ngang / dọc, Cắt, Tách nền, Làm nét bằng AI, Đặt lại chỉnh sửa), View (phóng to / thu nhỏ, Vừa màn hình Ctrl+0,
     100 % Ctrl+1); tên ảnh (• = chưa lưu); bên phải: ↶ ↷ + nút Xuất.
   - **Thanh tuỳ chọn** (dưới menu, như options bar): icon công cụ đang chọn + tuỳ chọn riêng: Move (Chèn
     ảnh, cỡ layer đang chọn, gợi ý), Crop (tỉ lệ Tự do / 1:1 / 4:3 / 16:9 / 9:16, Áp dụng / Huỷ, cỡ vùng cắt),
-    Blur (Làm mờ / Ô vuông, Chữ nhật / Elip, Độ mạnh), Hand / Zoom (+ / −, 100 %, Vừa màn hình).
-  - **Thanh công cụ dọc** (trái, 48 px, hằng `TOOLBAR`): Move V, Crop C | Blur B, Chèn ảnh I, Collage L |
-    Hand H, Zoom Z. Icon vẽ bằng vector (`paint_icon`) nên không phụ thuộc font; tooltip "Tên (phím)".
+    Blur (Làm mờ / Ô vuông, Chữ nhật / Elip, Độ mạnh), Tem nhân bản (cỡ cọ, độ cứng, độ trong suốt, Căn chỉnh),
+    Hand / Zoom (+ / −, 100 %, Vừa màn hình).
+  - **Thanh công cụ dọc** (trái, 48 px, hằng `TOOLBAR`): Move V, Crop C | Blur B, Tem nhân bản S, Chèn ảnh I,
+    Collage L | Hand H, Zoom Z. Icon vẽ bằng vector (`paint_icon`) nên không phụ thuộc font; tooltip "Tên (phím)".
     Chèn ảnh / Collage là nút hành động (không phải công cụ). Chưa mở ảnh thì chỉ Collage bấm được.
-  - **Panel phải**: Thuộc tính (opacity, độ mạnh / kiểu blur của layer chọn), Tách nền (AI xoá phông, nền
+  - **Panel phải**: Thuộc tính (opacity, độ mạnh / kiểu blur của layer chọn; chọn dòng "Nền" → độ trong suốt
+    của nền), Tách nền (AI xoá phông, nền
     trong suốt / màu ảnh thẻ / ảnh, tinh chỉnh viền — xem [background-removal.md](background-removal.md)), Adjust (6 thanh: sáng, tương
     phản, bão hoà, nhiệt độ, Sharpness, Clarity + Làm thẳng −45…45°), Tăng độ nét (Unsharp Mask — xem
-    [sharpen.md](sharpen.md)), Layer (trên → dưới, 👁 ẩn/hiện, ▲ ▼, nhân đôi, xoá; dòng "Nền" cuối cùng chỉ
-    ẩn/hiện), Xuất (JPEG chất lượng / PNG).
+    [sharpen.md](sharpen.md)), Làm mịn da ([skin-smoothing.md](skin-smoothing.md)), Làm nét bằng AI, Layer
+    (xem "Thứ tự layer" bên dưới), Xuất (JPEG chất lượng / PNG).
   - **Thanh trạng thái** (dưới): % zoom, cỡ ảnh, toạ độ X/Y px ảnh dưới con trỏ, số layer.
+- **Nhiều layer chồng nhau (như Photoshop):** số layer không giới hạn.
+  - **Chèn:** File › Chèn ảnh / nút I chọn được **nhiều ảnh một lần** (mỗi ảnh một layer, lệch nhau 3 % cạnh dài
+    để thấy hết); hoặc **kéo thả file** từ Finder / Explorer vào cửa sổ (`handle_dropped_files`: chưa mở ảnh → file
+    đầu làm nền, còn lại thành layer; đã mở → tất cả thành layer; khi đang kéo hiện lớp phủ "Thả để …").
+  - Layer mới (ảnh, blur, nhân bản) chèn **ngay trên mục đang chọn** (`Document::insert_layer`); chọn Nền → ngay
+    trên Nền; layer đang chọn nằm dưới Nền → layer mới cũng dưới Nền; không chọn gì → trên cùng.
+  - **Bấm chọn trên canvas theo pixel** (`Layer::hit`, như Auto-Select): layer ảnh chỉ "trúng" chỗ alpha > 10 %
+    (bỏ qua phần trong suốt của PNG, có tính xoay / lật), blur theo chữ nhật / elip, nhân bản theo nét. Layer nằm
+    dưới Nền đục bị che → không chọn bằng chuột (chọn trong bảng Layer).
+  - Bảng Layer: tiêu đề kèm số layer, mỗi dòng có **ảnh thu nhỏ** (texture 64 px, cache theo con trỏ `Arc` ảnh —
+    `layer_thumb`; blur / nhân bản hiện icon), **nhấp đúp tên để đổi tên** (Enter / bấm ra ngoài = lưu, Esc =
+    huỷ; `rename_layer`, 1 bước undo; Nền không đổi tên).
+- **Thứ tự layer (đổi chỗ ảnh đè lên nhau):** bảng Layer liệt kê trên → dưới **gồm cả dòng "Nền"** (chữ
+  nghiêng) ở đúng vị trí của nó. Chọn một dòng (cả Nền) rồi bấm ⏶ lên trên cùng / ▲ lên một lớp / ▼ xuống một lớp
+  / ⏷ xuống dưới cùng, hoặc **kéo thả** tên dòng (vạch cyan chỉ chỗ thả), hoặc Ctrl+] / Ctrl+[ (thêm Shift = trên
+  cùng / dưới cùng), hoặc chuột phải trên canvas (công cụ Move: chọn layer dưới con trỏ, chỗ trống = Nền) →
+  Sắp xếp / Nhân đôi / Xoá. Mỗi lần đổi = 1 bước undo.
+  - Nền không phải layer trong `layers`: vị trí của nó là `DocState::bg_index` (số layer vẽ **dưới** nền,
+    0 = dưới cùng như cũ). `stack_ids()` trả về thứ tự dưới → trên với `BACKGROUND_ID = 0`; `move_to(id, vị trí)`
+    xếp lại `layers` + `bg_index`. Xoá / nhân đôi layer nằm dưới nền tự chỉnh `bg_index`. Nền không xoá / nhân đôi
+    được.
+  - Vẽ (`render::compose`): nền dưới cùng + đục (mặc định) → dùng thẳng ảnh nền làm canvas như trước; nếu không
+    → canvas trong suốt, vẽ các layer dưới nền, trộn ảnh nền (đã tách nền / xoay / nền thay thế) với
+    `Background.opacity`, rồi vẽ các layer trên. Ví dụ ghép: tách nền người (nền Trong suốt) → chèn ảnh phong
+    cảnh → đưa ảnh đó xuống dưới Nền. Nền đục nằm trên layer khác thì che hết — bảng Layer nhắc tách nền hoặc
+    giảm độ trong suốt.
+- **Bộ nhớ / tốc độ:** ảnh nền và ảnh của layer chèn giữ trong `Arc<RgbaImage>` → mỗi bước undo chỉ tăng bộ đếm
+  tham chiếu (trước đây copy cả ảnh mỗi lần kéo). `BaseCache` giữ ảnh nền đã Adjust / mịn da / Unsharp ở cỡ xem
+  trước (khoá = con trỏ `Arc` ảnh + thông số + tỉ lệ) → kéo layer, tô Tem nhân bản không tính lại bộ lọc.
 - **Công cụ trên canvas:** Move: bấm = chọn layer trên cùng tại điểm (chỗ trống = bỏ chọn), kéo layer = di
   chuyển, kéo 4 nút góc trắng = đổi cỡ (góc đối diện đứng yên, Shift giữ tỉ lệ; `resize_from_corner`), kéo chỗ
-  trống = cuộn, mũi tên nhích 1 px / Shift 10 px. Crop: kéo khung (tối phần ngoài + lưới 1/3), Enter áp dụng,
+  trống = cuộn, mũi tên nhích 1 px / Shift 10 px (layer nhân bản không có nút góc). Tem nhân bản: Alt + bấm =
+  điểm mẫu, kéo = tô (xem [clone-stamp.md](clone-stamp.md)). Crop: kéo khung (tối phần ngoài + lưới 1/3), Enter áp dụng,
   Esc huỷ. Blur: kéo khung ≥ 4 px → tạo layer Blur. Hand: kéo = cuộn. Zoom: bấm = phóng to tại điểm bấm, Alt +
   bấm = thu nhỏ. Mọi công cụ: Space + kéo hoặc chuột giữa = cuộn; lăn chuột = zoom tại con trỏ.
   Con trỏ chuột đổi theo công cụ (Grab, ZoomIn/Out, Crosshair, Resize ở nút góc).
@@ -114,6 +152,8 @@
   tắt khi đang ở trang này (nhường cho zoom 100 %).
 - Bản Rust: nút góc đổi cỡ dùng hình bao **chưa xoay** của layer; chưa có nút xoay layer bằng chuột (bản Python có).
 - Bản Rust: Space + kéo cần focus ở canvas; nếu một nút đang được focus thì Space có thể bấm nút đó.
+- Bản Rust: menu chuột phải trên canvas chỉ có ở công cụ Move. Chưa chọn nhiều layer cùng lúc (Shift / Ctrl +
+  bấm), chưa có nhóm layer / chế độ hoà trộn (blend mode).
 
 ## Test
 
@@ -121,10 +161,15 @@
   lệ, xoay/lật toạ độ, cover_scale, pixelate / blur, chỉnh ảnh = đúng pipeline batch, đọc RGBA, ghi
   JPEG/PNG, đường dẫn `editor` — bản port của `tests/test_photo_core.py` cũ.
 - `rust/gui/tests/cpu_render.rs` (`cargo test -p pbe-gui`): framebuffer trộn alpha, ghép tài liệu, crop +
-  xoay 90° + lật, undo/redo, `layer_set_bounds_resizes_image_and_blur_layers`, Unsharp Mask ở mọi tỉ lệ.
+  xoay 90° + lật, undo/redo, `layer_set_bounds_resizes_image_and_blur_layers`, Unsharp Mask ở mọi tỉ lệ,
+  `background_can_move_above_layers_and_back` (nền lên trên / giữa, lộ layer ở phần đã tách nền, opacity nền,
+  undo), `reorder_delete_duplicate_keep_background_slot`, `new_layers_go_right_above_the_selection` (+ đổi tên),
+  `clicking_picks_the_top_layer_with_pixels`, Tem nhân bản, làm mịn da + `BaseCache`.
 - `rust/gui/src/photo/mod.rs` (`#[cfg(test)]`): `resize_from_corner` giữ góc đối diện, Shift giữ tỉ lệ.
 - Thủ công: `cargo run -p pbe-gui` → trang Sửa ảnh đơn: thử từng nút thanh công cụ dọc + phím V C B I L H Z,
   menu File / Edit / Image / View, kéo nút góc layer (có / không Shift), công cụ Zoom (bấm, Alt + bấm);
   mở ảnh lớn (> 20 MP), lăn zoom, Space+kéo,
-  chèn PNG trong suốt, che mặt bằng pixelate, cắt 16:9, Ctrl+Z nhiều lần, xuất JPEG/PNG.
+  chèn PNG trong suốt, che mặt bằng pixelate, cắt 16:9, Ctrl+Z nhiều lần, xuất JPEG/PNG; chèn nhiều ảnh một lần
+  (hộp chọn file + kéo thả từ Finder), nhấp đúp đổi tên, bấm vào chỗ trong suốt của PNG phải chọn layer dưới; đổi
+  ảnh nào đè lên ảnh nào (▲ ▼, kéo thả, Ctrl+] / Ctrl+[, chuột phải), tách nền rồi kéo ảnh chèn xuống dưới Nền.
   (Layer chữ và `.pbep` chưa port.)

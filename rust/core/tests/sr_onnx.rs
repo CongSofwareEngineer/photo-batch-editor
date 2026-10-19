@@ -50,3 +50,34 @@ fn sr_matches_python() {
         assert!(max <= 12.0 / 255.0, "SR {factor}x max {max} > 12/255");
     }
 }
+
+/// "Làm nét bằng AI" của Sửa ảnh đơn (docs/instruction/sharpen.md): model thật, ảnh nhiều ô →
+/// giữ cỡ + alpha, ảnh mờ thì nét hơn (độ tương phản cạnh tăng).
+#[test]
+fn ai_sharpen_with_the_real_model() {
+    use pbe_core::photo::effects::{ai_sharpen, gaussian_blur};
+    use pbe_core::photo::RgbaImage;
+    if !default_model_path().is_file() {
+        eprintln!("bỏ qua: thiếu model SR");
+        return;
+    }
+    let (h, w) = (300, 560); // 2 ô
+    let mut sharp = RgbaImage::new(h, w);
+    for y in 0..h {
+        for x in 0..w {
+            let v = if (x / 20 + y / 20) % 2 == 0 { 220 } else { 40 };
+            sharp.set_px(y, x, [v, v, v, 200]);
+        }
+    }
+    let soft = gaussian_blur(&sharp, 1.5);
+    let resolver = SuperResolver::new(None, Some(512)).expect("tạo resolver");
+    let _ = ai_sharpen(&soft.crop(0, 0, 32, 32), &resolver, 1.0, &mut |_| true); // khởi động session
+    let t = std::time::Instant::now();
+    let out = ai_sharpen(&soft, &resolver, 1.0, &mut |_| true).expect("ai_sharpen");
+    eprintln!("ai_sharpen {}×{}: {:?}", w, h, t.elapsed());
+    assert_eq!((out.w, out.h), (w, h));
+    assert_eq!(out.px(10, 10)[3], soft.px(10, 10)[3]);
+    // độ dốc tại cạnh (x = 19 | 20) tăng
+    let grad = |img: &RgbaImage| (10..290).map(|y| (img.px(y, 18)[0] as i32 - img.px(y, 21)[0] as i32).abs()).sum::<i32>();
+    assert!(grad(&out) > grad(&soft), "{} vs {}", grad(&out), grad(&soft));
+}

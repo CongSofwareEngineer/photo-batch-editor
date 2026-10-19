@@ -19,15 +19,21 @@ sub-folders. Originals are never modified.
   them with a live preview on a sample photo, rename, duplicate, export, delete. Every change is
   saved automatically; pick a setting in the Editor's “Setting” box to apply it.
 * **Photo editor** (sidebar) — one photo, Photoshop-style layout: menu bar (File / Edit / Image /
-  View) + tool options bar on top, vertical toolbar on the left (Move V, Crop C, Blur B, Insert
-  image I, Collage L, Hand H, Zoom Z), panels on the right, status bar at the bottom. Layers:
-  inserted images (PNG transparency, move, resize with corner handles — Shift keeps the ratio) and
-  blur / pixelate areas; crop (free, 1:1, 4:3, 16:9, 9:16, rule-of-thirds grid), rotate 90° /
+  View) + tool options bar on top, vertical toolbar on the left (Move V, Crop C, Blur B, Clone
+  stamp S, Insert image I, Collage L, Hand H, Zoom Z), panels on the right, status bar at the bottom. Layers:
+  any number of stacked layers — insert several photos at once or drag & drop files onto the window; new layers
+  go right above the selected one; thumbnails, double-click to rename; clicking picks the top layer that has
+  pixels there. Inserted images (PNG transparency, move, resize with corner handles — Shift keeps the ratio),
+  blur / pixelate areas and clone-stamp strokes; change the order (also the Background — e.g. put an
+  inserted photo behind a cut-out person) with ⏶ ▲ ▼ ⏷, drag & drop in Layers, right-click on the
+  canvas or Ctrl+] / Ctrl+[ (Shift = to front / back). **Clone stamp**: Alt + click picks the sample
+  area, then paint it over other places (size, hardness, opacity, aligned). Crop (free, 1:1, 4:3, 16:9, 9:16, rule-of-thirds grid), rotate 90° /
   straighten / flip, brightness / contrast / saturation / temperature / sharpness / clarity (same
-  algorithms as the batch), **Unsharp Mask** sharpening (Amount / Radius / Threshold, Light /
-  Medium / Strong presets). **Background removal** (AI, MODNet): cut the person out of the
-  background, check the selection (the part to remove is shown in red) and fix it with an Add /
-  Subtract brush before applying, then keep it transparent, use an ID-photo colour (white, blue, light blue, red, grey, or
+  algorithms as the batch), **Skin smoothing** (smoothness / radius / keep texture, skin areas
+  only), **Unsharp Mask** sharpening (Amount / Radius / Threshold, Light / Medium / Strong presets)
+  and **AI sharpen** (Real-ESRGAN rebuilds detail, photo size unchanged, ~10 s per megapixel). **Background removal** (AI, MODNet): cut the person out of the
+  background, check the selection (the part to remove is shown in red) and fix it with Add /
+  Subtract, Push edge (drag the edge out / in under the brush) and Shrink / Grow edge brushes before applying, then keep it transparent, use an ID-photo colour (white, blue, light blue, red, grey, or
   any colour) or another photo as the new background; shift / feather the edge and clean the old
   background colour out of hair; insert a PNG (clothes, accessories) on top. **Collage** window: 8 layouts, size, spacing, corner radius,
   background colour, drag / scroll to frame each photo, then open the result in the editor.
@@ -50,7 +56,7 @@ sub-folders. Originals are never modified.
   is used.
 * The current Rust port runs on the **CPU**. The GPU (CUDA/CuPy) branch of the Python version was
   not ported. Super Resolution is available behind the Cargo feature `sr` (pulls ONNX Runtime).
-  Background removal uses the `bgremove` feature of `pbe-core` (ONNX Runtime), always enabled by the
+  Background removal (`bgremove`) and AI sharpen (`sr`) features of `pbe-core` are always enabled by the
   GUI; the ONNX Runtime binaries are downloaded by the `ort` crate on the first build.
 * FFmpeg for the Video editor: put the binary in `ffmpeg/` (or set `PBE_FFMPEG`, or have `ffmpeg`
   on `PATH`).

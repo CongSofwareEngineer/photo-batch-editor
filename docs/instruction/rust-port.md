@@ -52,7 +52,7 @@
   output Python trong sai số test.
 - Super Resolution để sau feature `sr` (mặc định tắt) nên `core` không kéo ONNX runtime khi không cần:
   `cargo test --features sr`. `pipeline::process` nhận `Option<&dyn Upscaler>`; `enhance::SuperResolver`
-  là cài đặt. Nhánh GPU (CuPy) và resample khớp-từng-bit với OpenCV cho cubic/lanczos là phần tinh chỉnh
+  là cài đặt (GUI bật feature `sr` cho "Làm nét bằng AI" — xem sharpen.md). Nhánh GPU (CuPy) và resample khớp-từng-bit với OpenCV cho cubic/lanczos là phần tinh chỉnh
   về sau (test Python của resample chỉ kiểm tra shape/khoảng giá trị).
 
 ### GĐ4 — `core/photo/` + `core/video/`
